@@ -1,675 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Beacon of Hope Hospital | Telemedicine</title>
 
-<link rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
-
-<style>
-:root{
-  --primary:#0A5DB0;
-  --primary-dark:#063D78;
-  --blue:#0D7AC7;
-  --light:#F4F8FC;
-  --white:#fff;
-  --text:#1E293B;
-  --muted:#64748B;
-  --success:#16A34A;
-  --warning:#D97706;
-  --danger:#DC2626;
-  --border:#E2E8F0;
-  --shadow:0 8px 25px rgba(15,23,42,.08);
-  --radius:14px;
-}
-
-*{box-sizing:border-box}
-
-body{
-  margin:0;
-  font-family:Arial,Helvetica,sans-serif;
-  background:var(--light);
-  color:var(--text);
-}
-
-button,input,select,textarea{font:inherit}
-button{cursor:pointer}
-
-.hidden{display:none!important}
-
-h1,h2,h3,h4{margin-top:0}
-
-.form-group{margin-bottom:16px}
-
-label{
-  display:block;
-  margin-bottom:7px;
-  font-weight:bold;
-  font-size:14px;
-}
-
-.form-control{
-  width:100%;
-  padding:12px 14px;
-  border:1px solid var(--border);
-  border-radius:9px;
-  outline:none;
-  background:#fff;
-}
-
-.form-control:focus{
-  border-color:var(--primary);
-  box-shadow:0 0 0 3px rgba(10,93,176,.1);
-}
-
-.btn{
-  border:0;
-  border-radius:9px;
-  padding:11px 16px;
-  font-weight:bold;
-  transition:.2s;
-  margin:2px;
-}
-
-.btn:hover{transform:translateY(-1px)}
-
-.btn-primary{background:var(--primary);color:white}
-.btn-secondary{background:#E8F2FC;color:var(--primary)}
-.btn-success{background:var(--success);color:white}
-.btn-warning{background:var(--warning);color:white}
-.btn-danger{background:var(--danger);color:white}
-.btn-dark{background:#334155;color:white}
-.btn-block{width:100%}
-
-.card{
-  background:white;
-  border-radius:var(--radius);
-  box-shadow:var(--shadow);
-  border:1px solid var(--border);
-  padding:20px;
-  margin-bottom:20px;
-}
-
-.grid{
-  display:grid;
-  gap:18px;
-}
-
-.grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}
-.grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}
-.grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}
-
-.flex{
-  display:flex;
-  gap:10px;
-  align-items:center;
-  flex-wrap:wrap;
-}
-
-.space-between{justify-content:space-between}
-
-.text-muted{color:var(--muted)}
-.small{font-size:12px}
-.mt{margin-top:15px}
-
-.page-title{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  gap:10px;
-  flex-wrap:wrap;
-}
-
-.table-wrap{overflow-x:auto}
-
-table{
-  width:100%;
-  border-collapse:collapse;
-}
-
-th,td{
-  padding:12px;
-  border-bottom:1px solid var(--border);
-  text-align:left;
-  font-size:14px;
-  vertical-align:top;
-}
-
-th{
-  background:#F8FAFC;
-  color:#475569;
-}
-
-.badge{
-  display:inline-block;
-  padding:5px 9px;
-  border-radius:999px;
-  font-size:11px;
-  font-weight:bold;
-}
-
-.badge-success{color:#166534;background:#DCFCE7}
-.badge-warning{color:#92400E;background:#FEF3C7}
-.badge-danger{color:#991B1B;background:#FEE2E2}
-.badge-info{color:#075985;background:#E0F2FE}
-.badge-dark{color:#334155;background:#E2E8F0}
-
-.alert{
-  padding:13px 15px;
-  border-radius:9px;
-  margin-bottom:15px;
-}
-
-.alert-info{background:#E0F2FE;color:#075985}
-.alert-success{background:#DCFCE7;color:#166534}
-.alert-warning{background:#FEF3C7;color:#92400E}
-.alert-danger{background:#FEE2E2;color:#991B1B}
-
-.empty{
-  text-align:center;
-  padding:35px;
-  color:var(--muted);
-}
-
-/* LOGIN */
-
-.login-page{
-  min-height:100vh;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  padding:25px;
-  background:linear-gradient(135deg,#0A5DB0,#063D78);
-}
-
-.login-container{
-  width:100%;
-  max-width:1200px;
-  display:grid;
-  grid-template-columns:1.55fr 1fr;
-  background:white;
-  border-radius:24px;
-  overflow:hidden;
-  box-shadow:0 25px 70px rgba(0,0,0,.22);
-}
-
-.login-info{
-  padding:55px 65px;
-  color:white;
-  background:linear-gradient(145deg,#0A5DB0,#063D78);
-}
-
-.login-info h1{font-size:38px}
-
-.login-info p{line-height:1.7;color:#E8F3FF}
-
-.feature{
-  display:flex;
-  gap:14px;
-  margin:20px 0;
-  align-items:flex-start;
-}
-
-.feature-icon{
-  width:42px;
-  height:42px;
-  border-radius:50%;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  background:rgba(255,255,255,.15);
-  font-size:20px;
-  flex-shrink:0;
-}
-
-.login-box{padding:45px 50px}
-
-.new-patient-box{
-  margin-top:20px;
-  padding:16px;
-  border:1px solid #D8E8F7;
-  background:#F5FAFF;
-  border-radius:12px;
-  text-align:center;
-}
-
-.demo-login{
-  margin-top:20px;
-  padding:12px;
-  border-radius:10px;
-  background:#F8FAFC;
-  font-size:12px;
-  color:var(--muted);
-}
-
-/* APP */
-
-.app{min-height:100vh}
-
-.topbar{
-  height:70px;
-  background:white;
-  border-bottom:1px solid var(--border);
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  padding:0 22px;
-  position:sticky;
-  top:0;
-  z-index:1000;
-}
-
-.brand{
-  display:flex;
-  align-items:center;
-  gap:12px;
-  font-weight:bold;
-  color:var(--primary);
-}
-
-.logo{
-  width:42px;
-  height:42px;
-  background:var(--primary);
-  color:white;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  border-radius:11px;
-  font-size:20px;
-}
-
-.user-area{
-  display:flex;
-  align-items:center;
-  gap:15px;
-}
-
-.user-avatar{
-  width:38px;
-  height:38px;
-  background:#DCEEFF;
-  color:var(--primary);
-  border-radius:50%;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  font-weight:bold;
-}
-
-.layout{display:flex}
-
-.sidebar{
-  width:250px;
-  min-height:calc(100vh - 70px);
-  background:#062F5C;
-  color:white;
-  padding:18px 12px;
-  position:fixed;
-  left:0;
-  top:70px;
-  bottom:0;
-  overflow-y:auto;
-  z-index:900;
-}
-
-.sidebar button{
-  width:100%;
-  background:transparent;
-  border:0;
-  color:#DDEBFA;
-  padding:12px;
-  text-align:left;
-  border-radius:8px;
-  margin-bottom:3px;
-}
-
-.sidebar button:hover,
-.sidebar button.active{
-  background:rgba(255,255,255,.15);
-  color:white;
-}
-
-.sidebar-section{
-  margin:18px 10px 7px;
-  font-size:11px;
-  text-transform:uppercase;
-  color:#8EB9E5;
-  font-weight:bold;
-}
-
-.content{
-  margin-left:250px;
-  width:calc(100% - 250px);
-  padding:25px;
-}
-
-.stat-card{
-  padding:20px;
-  border-radius:14px;
-  background:white;
-  border:1px solid var(--border);
-  box-shadow:var(--shadow);
-}
-
-.stat-title{
-  color:var(--muted);
-  font-size:13px;
-}
-
-.stat-number{
-  font-size:30px;
-  font-weight:bold;
-  margin-top:8px;
-  color:var(--primary);
-}
-
-.progress{
-  height:10px;
-  background:#E2E8F0;
-  border-radius:20px;
-  overflow:hidden;
-}
-
-.progress-bar{
-  height:100%;
-  background:var(--primary);
-}
-
-.map{
-  width:100%;
-  height:400px;
-  border-radius:12px;
-  overflow:hidden;
-  border:1px solid var(--border);
-}
-
-.modal-overlay{
-  position:fixed;
-  inset:0;
-  background:rgba(15,23,42,.55);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  z-index:3000;
-  padding:20px;
-}
-
-.modal{
-  background:white;
-  width:100%;
-  max-width:750px;
-  max-height:90vh;
-  overflow-y:auto;
-  border-radius:16px;
-  padding:25px;
-}
-
-.mobile-menu{
-  display:none;
-  background:none;
-  border:0;
-  font-size:23px;
-  color:var(--primary);
-}
-
-.service-card{
-  border:1px solid var(--border);
-  border-radius:12px;
-  padding:18px;
-  background:#fff;
-}
-
-.service-icon{
-  font-size:30px;
-}
-
-.kpi{
-  border-left:4px solid var(--primary);
-  padding-left:12px;
-}
-
-.slot-ok{color:var(--success);font-weight:bold}
-.slot-busy{color:var(--danger);font-weight:bold}
-
-@media(max-width:900px){
-  .login-container{grid-template-columns:1fr}
-  .login-info{padding:35px 30px}
-  .login-info h1{font-size:28px}
-
-  .sidebar{
-    transform:translateX(-100%);
-    transition:.25s;
-  }
-
-  .sidebar.open{transform:translateX(0)}
-
-  .content{
-    margin-left:0;
-    width:100%;
-    padding:15px;
-  }
-
-  .mobile-menu{display:block}
-
-  .grid-3,.grid-4{
-    grid-template-columns:1fr 1fr;
-  }
-}
-
-@media(max-width:600px){
-  .grid-2,.grid-3,.grid-4{
-    grid-template-columns:1fr;
-  }
-
-  .login-box{padding:25px}
-
-  .topbar{padding:0 12px}
-
-  .brand span,.user-name{display:none}
-}
-
-.login-hero{position:relative;min-height:100%;background:#062F5C;overflow:hidden}
-.login-hero img{width:100%;height:100%;min-height:650px;object-fit:cover;display:block;opacity:.78}
-.login-hero-overlay{position:absolute;inset:0;background:linear-gradient(135deg,rgba(6,47,92,.92),rgba(10,93,176,.55));display:flex;flex-direction:column;justify-content:flex-end;padding:38px;color:white}
-.login-tools{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:18px}
-.login-tool{border:1px solid #D8E8F7;background:#F8FBFF;border-radius:10px;padding:10px;color:var(--primary);font-size:13px;font-weight:bold}
-.chat-window{height:330px;overflow:auto;background:#F8FAFC;border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:12px}
-.chat-msg{padding:9px 11px;border-radius:12px;margin:8px 0;max-width:85%;line-height:1.45;font-size:13px}
-.chat-bot{background:#E8F2FC;color:#123}
-.chat-user{background:#0A5DB0;color:#fff;margin-left:auto}
-@media(max-width:600px){.login-tools{grid-template-columns:1fr}.login-hero img{min-height:360px}}
-</style>
-
-</head>
-
-<body>
-
-<!-- =========================================================
-LOGIN
-========================================================= -->
-
-<div id="loginPage" class="login-page">
-
-  <div class="login-container">
-
-
-<div class="login-info login-hero">
-  <img src="https://images.unsplash.com/photo-1584982751601-97dcc096659c?auto=format&fit=crop&w=1200&q=85" alt="Telemedicine consultation">
-  <div class="login-hero-overlay">
-    <div>
-      <div class="badge" style="background:rgba(255,255,255,.18);color:#fff;margin-bottom:12px">24/7 DIGITAL HEALTH ACCESS</div>
-      <h1>Beacon of Hope Hospital</h1>
-      <p>Ongata Rongai — Telemedicine, Physical Booking & Medicine Delivery</p>
-      <h2>Healthcare from wherever you are</h2>
-      <p>Book a virtual consultation or physical hospital visit, access home services, receive doctor-prescribed medicines and track deliveries.</p>
-      <div class="feature"><div class="feature-icon">👨‍⚕️</div><div><strong>Telemedicine</strong><div class="small">Video or audio consultations with our doctors.</div></div></div>
-      <div class="feature"><div class="feature-icon">🏥</div><div><strong>Physical Booking</strong><div class="small">Reserve a hospital appointment before you come in.</div></div></div>
-      <div class="feature"><div class="feature-icon">💊</div><div><strong>Pharmacy & Delivery</strong><div class="small">Doctor-prescribed medicines delivered to you.</div></div></div>
-      <div class="feature"><div class="feature-icon">🏠</div><div><strong>Home Services</strong><div class="small">Request services such as wound dressing at home.</div></div></div>
-    </div>
-  </div>
-</div>
-
-<div class="login-box">
-
-  <h2>Sign in</h2>
-
-  <p class="text-muted">
-    Access your Beacon of Hope account.
-  </p>
-
-  <form id="loginForm">
-
-    <div class="form-group">
-      <label>Email</label>
-      <input
-        id="loginEmail"
-        class="form-control"
-        type="email"
-        placeholder="you@example.com"
-        required
-      >
-    </div>
-
-    <div class="form-group">
-      <label>Password</label>
-      <input
-        id="loginPassword"
-        class="form-control"
-        type="password"
-        placeholder="Password"
-        required
-      >
-    </div>
-
-    <button class="btn btn-primary btn-block">
-      Sign In
-    </button>
-
-  </form>
-
-  <div class="login-tools">
-    <button type="button" class="login-tool" onclick="showForgotPassword()">🔐 Forgot Password</button>
-    <button type="button" class="login-tool" onclick="showEnquiries()">📞 Enquiries & Support</button>
-    <button type="button" class="login-tool" onclick="showServiceChatbot()">🤖 Service Assistant</button>
-  </div>
-
-  <div class="new-patient-box">
-
-    <strong>New patient?</strong>
-
-    <p class="small">
-      Create your own patient account.
-    </p>
-
-    <button
-      class="btn btn-secondary"
-      onclick="showRegistration()"
-    >
-      Create Patient Account
-    </button>
-
-  </div>
-
-  <div class="demo-login">
-    <strong>Current Demo Accounts</strong>
-    <p class="small text-muted" style="margin:6px 0 12px">Use these accounts to test each current staff role and the patient experience.</p>
-
-    <div class="table-wrap">
-      <table style="font-size:12px">
-        <thead><tr><th>Role</th><th>Name</th><th>Email</th><th>Password</th></tr></thead>
-        <tbody>
-          <tr><td>Administrator</td><td>Boniface Machogu</td><td>boniface@beaconafrica.org</td><td>DemoBoniface2026!</td></tr>
-          <tr><td>Doctor</td><td>Eunice Wanjiku Ngugi</td><td>eunice.ngugi@beaconhope.demo</td><td>DemoEunice2026!</td></tr>
-          <tr><td>Doctor</td><td>George Keitany</td><td>george.keitany@beaconhope.demo</td><td>DemoGeorge2026!</td></tr>
-          <tr><td>Doctor</td><td>Benard Onyinsi</td><td>benard.onyinsi@beaconhope.demo</td><td>DemoBenard2026!</td></tr>
-          <tr><td>Doctor</td><td>Angela Mwangi</td><td>angela.mwangi@beaconhope.demo</td><td>DemoAngela2026!</td></tr>
-          <tr><td>Nursing Officer</td><td>Beatrice Gitamo</td><td>beatrice.gitamo@beaconhope.demo</td><td>DemoBeatrice2026!</td></tr>
-          <tr><td>Nursing Officer</td><td>Gerald Ragira</td><td>gerald.ragira@beaconhope.demo</td><td>DemoGerald2026!</td></tr>
-          <tr><td>Nursing Officer</td><td>Dennis Onami</td><td>dennis.onami@beaconhope.demo</td><td>DemoDennis2026!</td></tr>
-          <tr><td>Nursing Officer</td><td>Caroline Wanjiku</td><td>caroline.wanjiku@beaconhope.demo</td><td>DemoCaroline2026!</td></tr>
-          <tr><td>Pharmacist</td><td>Peter Miano</td><td>peter.miano@beaconhope.demo</td><td>DemoPeter2026!</td></tr>
-          <tr><td>Pharmacist</td><td>Rajab Ziada</td><td>rajab.ziada@beaconhope.demo</td><td>DemoRajab2026!</td></tr>
-          <tr><td>Rider</td><td>Dancan Bande</td><td>dancan.bande@beaconhope.demo</td><td>DemoDancan2026!</td></tr>
-          <tr><td>Patient</td><td>Demo Patient</td><td>patient@beaconhope.demo</td><td>Demo123!</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-</div>
-
-  </div>
-
-</div>
-
-<!-- =========================================================
-APPLICATION
-========================================================= -->
-
-<div id="app" class="app hidden">
-
-  <header class="topbar">
-
-
-<div class="brand">
-
-  <button
-    class="mobile-menu"
-    onclick="toggleSidebar()"
-  >
-    ☰
-  </button>
-
-  <div class="logo">+</div>
-
-  <span>Beacon of Hope Hospital</span>
-
-</div>
-
-<div class="user-area">
-
-  <div>
-    <div class="user-name" id="topUserName"></div>
-    <div class="small text-muted" id="topUserRole"></div>
-  </div>
-
-  <div class="user-avatar" id="userAvatar">U</div>
-
-  <button
-    class="btn btn-secondary"
-    onclick="logout()"
-  >
-    Logout
-  </button>
-
-</div>
-
-  </header>
-
-  <div class="layout">
-
-
-<aside id="sidebar" class="sidebar"></aside>
-
-<main id="content" class="content"></main>
-
-  </div>
-
-</div>
-
-<!-- MODAL -->
-
-<div id="modal" class="modal-overlay hidden">
-  <div id="modalContent" class="modal"></div>
-</div>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
-
-<script>
 
 /* =========================================================
 DATABASE
@@ -762,6 +91,7 @@ const defaultDB = {
     {id:"pharmacist_peter",name:"Peter Miano",email:"peter.miano@beaconhope.demo",password:"DemoPeter2026!",role:"pharmacist",phone:"0700000301",enabled:true},
     {id:"pharmacist_rajab",name:"Rajab Ziada",email:"rajab.ziada@beaconhope.demo",password:"DemoRajab2026!",role:"pharmacist",phone:"0700000302",enabled:true},
     {id:"rider_dancan",name:"Dancan Bande",email:"dancan.bande@beaconhope.demo",password:"DemoDancan2026!",role:"rider",phone:"0700000401",enabled:true,vehicle:"Motorbike",currentLocation:null},
+    {id:"lab_tech1",name:"Laboratory Technician",email:"lab.technician@beaconhope.demo",password:"DemoLab2026!",role:"lab_technician",phone:"0700000501",enabled:true},
     {id:"patient1",name:"Demo Patient",email:"patient@beaconhope.demo",password:"Demo123!",role:"patient",phone:"0700000005",enabled:true,address:"Rongai, Nairobi"}
   ],
 
@@ -1536,319 +866,88 @@ SIDEBAR
 ========================================================= */
 
 function buildSidebar(){
-
-let html=`
-
-
-<div class="sidebar-section">
-  Main
-</div>
-
-<button
-  data-page="dashboard"
-  onclick="navigate('dashboard')"
->
-  🏠 Dashboard
-</button>
-
-`;
-
-if(currentUser.role==="patient"){
-
-
-html+=`
-
-  <div class="sidebar-section">
-    Healthcare
-  </div>
-
-  <button
-    data-page="appointments"
-    onclick="navigate('appointments')"
-  >
-    📅 Appointments
-  </button>
-
-  <button
-    data-page="consultation"
-    onclick="navigate('consultation')"
-  >
-    🎥 Consultation
-  </button>
-
-  <button
-    data-page="prescriptions"
-    onclick="navigate('prescriptions')"
-  >
-    💊 Prescriptions
-  </button>
-
-  <button
-    data-page="pharmacy"
-    onclick="navigate('pharmacy')"
-  >
-    💊 Pharmacy Orders
-  </button>
-
-  <button
-    data-page="laboratory"
-    onclick="navigate('laboratory')"
-  >
-    🧪 Laboratory
-  </button>
-
-  <button
-    data-page="home-services"
-    onclick="navigate('home-services')"
-  >
-    🏠 Home Services
-  </button>
-
-  <button
-    data-page="deliveries"
-    onclick="navigate('deliveries')"
-  >
-    🚚 Delivery Status
-  </button>
-
-  <button
-    data-page="invoices"
-    onclick="navigate('invoices')"
-  >
-    💳 Payments
-  </button>
-
-  <button
-    data-page="notifications"
-    onclick="navigate('notifications')"
-  >
-    🔔 Notifications
-  </button>
-`;
-
-}
-
-if(currentUser.role==="doctor"){
-
-
-html+=`
-
-  <div class="sidebar-section">
-    Doctor
-  </div>
-
-  <button
-    data-page="appointments"
-    onclick="navigate('appointments')"
-  >
-    📅 Appointments
-  </button>
-
-  <button
-    data-page="consultation"
-    onclick="navigate('consultation')"
-  >
-    🎥 Consultation
-  </button>
-
-  <button
-    data-page="prescriptions"
-    onclick="navigate('prescriptions')"
-  >
-    💊 Prescriptions
-  </button>
-
-  <button
-    data-page="doctor-settings"
-    onclick="navigate('doctor-settings')"
-  >
-    ⚙️ Booking Capacity
-  </button>
-
-  <button
-    data-page="notifications"
-    onclick="navigate('notifications')"
-  >
-    🔔 Notifications
-  </button>
-`;
-
-}
-
-if(currentUser.role==="pharmacist"){
-
-
-html+=`
-
-  <div class="sidebar-section">
-    Pharmacy
-  </div>
-
-  <button
-    data-page="pharmacy"
-    onclick="navigate('pharmacy')"
-  >
-    💊 Pharmacy Orders
-  </button>
-
-  <button
-    data-page="inventory"
-    onclick="navigate('inventory')"
-  >
-    📦 Inventory
-  </button>
-
-  <button
-    data-page="deliveries"
-    onclick="navigate('deliveries')"
-  >
-    🚚 Paid Deliveries
-  </button>
-
-  <button
-    data-page="notifications"
-    onclick="navigate('notifications')"
-  >
-    🔔 Notifications
-  </button>
-`;
-
-}
-
-if(currentUser.role==="rider"){
-
-
-html+=`
-
-  <div class="sidebar-section">
-    Delivery
-  </div>
-
-  <button
-    data-page="deliveries"
-    onclick="navigate('deliveries')"
-  >
-    🚚 My Deliveries
-  </button>
-
-  <button
-    data-page="rider-map"
-    onclick="navigate('rider-map')"
-  >
-    🗺️ Navigation
-  </button>
-
-  <button
-    data-page="notifications"
-    onclick="navigate('notifications')"
-  >
-    🔔 Notifications
-  </button>
-`;
-
-}
-
-if(currentUser.role==="admin"){
-
-
-html+=`
-
-  <div class="sidebar-section">
-    Administration
-  </div>
-
-  <button
-    data-page="users"
-    onclick="navigate('users')"
-  >
-    👥 Users
-  </button>
-
-  <button
-    data-page="appointments"
-    onclick="navigate('appointments')"
-  >
-    📅 Appointments
-  </button>
-
-  <button
-    data-page="pharmacy"
-    onclick="navigate('pharmacy')"
-  >
-    💊 Pharmacy Orders
-  </button>
-
-  <button
-    data-page="inventory"
-    onclick="navigate('inventory')"
-  >
-    📦 Inventory
-  </button>
-
-  <button
-    data-page="admin-orders"
-    onclick="navigate('admin-orders')"
-  >
-    🚚 Dispatch & Rider Assignment
-  </button>
-
-  <button
-    data-page="deliveries"
-    onclick="navigate('deliveries')"
-  >
-    📍 Deliveries
-  </button>
-
-  <button
-    data-page="laboratory"
-    onclick="navigate('laboratory')"
-  >
-    🧪 Laboratory
-  </button>
-
-  <button
-    data-page="home-services"
-    onclick="navigate('home-services')"
-  >
-    🏠 Home Services
-  </button>
-
-  <button
-    data-page="invoices"
-    onclick="navigate('invoices')"
-  >
-    💳 Invoices
-  </button>
-
-  <button
-    data-page="notifications"
-    onclick="navigate('notifications')"
-  >
-    🔔 Notifications
-  </button>
-`;
-
-}
-
-html+=`
-
-
-<div class="sidebar-section">
-  Account
-</div>
-
-<button
-  data-page="profile"
-  onclick="navigate('profile')"
->
-  👤 My Profile
-</button>
-
-`;
-
-document
-.getElementById("sidebar")
-.innerHTML=html;
+  const sidebar = document.getElementById("sidebar");
+  sidebar.innerHTML = "";
+
+  const addSection = (title, items) => {
+    const section = document.createElement("div");
+    section.className = "sidebar-section";
+    section.textContent = title;
+    sidebar.appendChild(section);
+
+    items.forEach(({ page, label, action }) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.page = page;
+      button.textContent = label;
+      button.onclick = () => navigate(action || page);
+      sidebar.appendChild(button);
+    });
+  };
+
+  addSection("Main", [
+    { page: "dashboard", label: "🏠 Dashboard" }
+  ]);
+
+  if (currentUser.role === "patient") {
+    addSection("Healthcare", [
+      { page: "appointments", label: "📅 Appointments" },
+      { page: "consultation", label: "🎥 Consultation" },
+      { page: "prescriptions", label: "💊 Prescriptions" },
+      { page: "pharmacy", label: "💊 Pharmacy Orders" },
+      { page: "laboratory", label: "🧪 Laboratory" },
+      { page: "home-services", label: "🏠 Home Services" },
+      { page: "deliveries", label: "🚚 Delivery Status" },
+      { page: "invoices", label: "💳 Payments" },
+      { page: "notifications", label: "🔔 Notifications" }
+    ]);
+  }
+
+  if (currentUser.role === "doctor") {
+    addSection("Doctor", [
+      { page: "appointments", label: "📅 Appointments" },
+      { page: "consultation", label: "🎥 Consultation" },
+      { page: "prescriptions", label: "💊 Prescriptions" },
+      { page: "doctor-settings", label: "⚙️ Booking Capacity" },
+      { page: "notifications", label: "🔔 Notifications" }
+    ]);
+  }
+
+  if (currentUser.role === "pharmacist") {
+    addSection("Pharmacy", [
+      { page: "pharmacy", label: "💊 Pharmacy Orders" },
+      { page: "inventory", label: "📦 Inventory" },
+      { page: "deliveries", label: "🚚 Paid Deliveries" },
+      { page: "notifications", label: "🔔 Notifications" }
+    ]);
+  }
+
+  if (currentUser.role === "rider") {
+    addSection("Delivery", [
+      { page: "deliveries", label: "🚚 My Deliveries" },
+      { page: "rider-map", label: "🗺️ Navigation" },
+      { page: "notifications", label: "🔔 Notifications" }
+    ]);
+  }
+
+  if (currentUser.role === "admin") {
+    addSection("Administration", [
+      { page: "users", label: "👥 Users" },
+      { page: "appointments", label: "📅 Appointments" },
+      { page: "pharmacy", label: "💊 Pharmacy Orders" },
+      { page: "inventory", label: "📦 Inventory" },
+      { page: "admin-orders", label: "🚚 Dispatch & Rider Assignment" },
+      { page: "deliveries", label: "📍 Deliveries" },
+      { page: "laboratory", label: "🧪 Laboratory" },
+      { page: "home-services", label: "🏠 Home Services" },
+      { page: "invoices", label: "💳 Invoices" },
+      { page: "notifications", label: "🔔 Notifications" }
+    ]);
+  }
+
+  addSection("Account", [
+    { page: "profile", label: "👤 My Profile" }
+  ]);
 }
 
 /* =========================================================
@@ -1982,527 +1081,272 @@ function renderNurseDashboard(){
     </table></div></div>`;
 }
 
+function createElement(tag, className, textContent){
+ const element = document.createElement(tag);
+ if (className) element.className = className;
+ if (textContent !== undefined && textContent !== null) element.textContent = textContent;
+ return element;
+}
+
+function appendChildren(parent, ...children){
+ children.forEach(child => {
+   if (child) parent.appendChild(child);
+ });
+ return parent;
+}
+
+function makeButton(label, variant = "primary", onClick){
+ const button = createElement("button", `btn btn-${variant}`);
+ button.type = "button";
+ button.textContent = label;
+ if (typeof onClick === "function") {
+   button.onclick = onClick;
+ }
+ return button;
+}
+
+function makeStatCard(title, value){
+ const card = createElement("div", "stat-card");
+ appendChildren(card,
+   createElement("div", "stat-title", title),
+   createElement("div", "stat-number", value)
+ );
+ return card;
+}
+
+function makeAlert(message, tone = "info"){
+ const alert = createElement("div", `alert alert-${tone}`);
+ alert.innerHTML = message;
+ return alert;
+}
+
+function createAppointmentTableElement(list){
+ const wrapper = createElement("div", "table-wrap");
+ const table = document.createElement("table");
+ const thead = document.createElement("thead");
+ const headRow = document.createElement("tr");
+ appendChildren(headRow,
+   createElement("th", null, "Date"),
+   createElement("th", null, "Start"),
+   createElement("th", null, "End"),
+   createElement("th", null, "Patient"),
+   createElement("th", null, "Doctor"),
+   createElement("th", null, "Specialty"),
+   createElement("th", null, "Type"),
+   createElement("th", null, "Status"),
+   createElement("th", null, "Action")
+ );
+ thead.appendChild(headRow);
+ table.appendChild(thead);
+
+ const tbody = document.createElement("tbody");
+ list.forEach(a => {
+   const patient = getUser(a.patientId);
+   const doctor = getUser(a.doctorId);
+   const row = document.createElement("tr");
+   const status = createElement("td");
+   status.innerHTML = `<span class="badge ${a.status === "Confirmed" ? "badge-success" : a.status === "Pending" ? "badge-warning" : a.status === "Cancelled" ? "badge-danger" : "badge-info"}">${escapeHTML(a.status || "-")}</span>`;
+
+   const action = document.createElement("td");
+   if (a.status === "Confirmed") {
+     const join = makeButton("🎥 Join", "primary", () => joinConsultation(a.id));
+     action.appendChild(join);
+   }
+
+   appendChildren(row,
+     createElement("td", null, a.date || "-"),
+     createElement("td", null, a.time || "-"),
+     createElement("td", null, a.endTime || "-"),
+     createElement("td", null, patient ? patient.name : "-"),
+     createElement("td", null, doctor ? doctor.name : "-"),
+     createElement("td", null, doctor ? (doctor.specialty || "General Doctor") : "-"),
+     createElement("td", null, a.type || "-"),
+     status,
+     action
+   );
+   tbody.appendChild(row);
+ });
+
+ table.appendChild(tbody);
+ wrapper.appendChild(table);
+ return wrapper;
+}
+
+function makePageContent(){
+ const content = document.getElementById("content");
+ content.innerHTML = "";
+ return content;
+}
+
 function renderAdminDashboard(){
+ const content = makePageContent();
+ const patients = db.users.filter(u => u.role === "patient").length;
+ const doctors = db.users.filter(u => u.role === "doctor").length;
+ const paidInvoices = db.invoices.filter(i => i.status === "Paid");
+ const revenue = paidInvoices.reduce((sum, i) => sum + Number(i.total), 0);
+ const paidDeliveries = db.deliveries.filter(d =>
+   d.status === "Paid - Awaiting Dispatch" ||
+   d.status === "Assigned" ||
+   d.status === "Picked Up" ||
+   d.status === "In Transit"
+ ).length;
+ const pendingPayments = db.invoices.filter(i => i.status === "Pending").length;
+ const homeRequests = db.homeServices.length;
+ const pharmacyOrders = db.pharmacyOrders.length;
 
-const patients =
-db.users.filter(
-u=>u.role==="patient"
-).length;
+ const title = createElement("h1", "page-title", "Administrator Dashboard");
+ const subtitle = createElement("p", "text-muted", "Complete operational overview.");
 
-const doctors =
-db.users.filter(
-u=>u.role==="doctor"
-).length;
+ const stats = createElement("div", "grid grid-4");
+ appendChildren(stats,
+   makeStatCard("Patients", String(patients)),
+   makeStatCard("Doctors", String(doctors)),
+   makeStatCard("Pending Payments", String(pendingPayments)),
+   makeStatCard("Paid Deliveries", String(paidDeliveries))
+ );
 
-const paidInvoices =
-db.invoices.filter(
-i=>i.status==="Paid"
-);
+ const stats2 = createElement("div", "grid grid-4");
+ appendChildren(stats2,
+   makeStatCard("Pharmacy Orders", String(pharmacyOrders)),
+   makeStatCard("Home Services", String(homeRequests)),
+   makeStatCard("Laboratory Requests", String(db.labRequests.length)),
+   makeStatCard("Revenue", money(revenue))
+ );
 
-const revenue =
-paidInvoices.reduce(
-(sum,i)=>sum+Number(i.total),
-0
-);
+ const grid = createElement("div", "grid grid-2");
 
-const paidDeliveries =
-db.deliveries.filter(
-d=>
-d.status==="Paid - Awaiting Dispatch" ||
-d.status==="Assigned" ||
-d.status==="Picked Up" ||
-d.status==="In Transit"
-).length;
+ const financialCard = createElement("div", "card");
+ const financeTitle = createElement("h3", null, "Financial Analysis");
+ const table = createElement("table");
+ const header = document.createElement("tr");
+ appendChildren(header,
+   createElement("th", null, "Type"),
+   createElement("th", null, "Paid"),
+   createElement("th", null, "Revenue")
+ );
+ table.appendChild(header);
 
-const pendingPayments =
-db.invoices.filter(
-i=>i.status==="Pending"
-).length;
+ ["Consultation", "Pharmacy", "Delivery", "Home Service", "Laboratory"].forEach(type => {
+   const invoices = db.invoices.filter(i => i.type === type);
+   const paid = invoices.filter(i => i.status === "Paid");
+   const total = paid.reduce((sum, i) => sum + Number(i.total), 0);
+   const row = document.createElement("tr");
+   appendChildren(row,
+     createElement("td", null, type),
+     createElement("td", null, String(paid.length)),
+     createElement("td", null, money(total))
+   );
+   table.appendChild(row);
+ });
+ financialCard.append(financeTitle, table);
 
-const homeRequests =
-db.homeServices.length;
+ const workflowCard = createElement("div", "card");
+ const workflowTitle = createElement("h3", null, "Important Workflow");
+ const successAlert = makeAlert("When a patient pays a delivery invoice, the order appears immediately in the <strong>Pharmacy Dispatch & Rider Assignment</strong> section.", "success");
+ const infoAlert = makeAlert("The pharmacist can then mark the paid medicine order as <strong>Ready / Dispatched</strong>.", "info");
+ const openQueue = makeButton("Open Dispatch Queue", "primary", () => navigate("admin-orders"));
+ appendChildren(workflowCard, workflowTitle, successAlert, infoAlert, openQueue);
 
-const pharmacyOrders =
-db.pharmacyOrders.length;
+ appendChildren(grid, financialCard, workflowCard);
 
-document.getElementById(
-"content"
-).innerHTML=`
+ const adminCard = createElement("div", "card");
+ const quickTitle = createElement("h3", null, "Quick Administration");
+ const actions = createElement("div", "flex");
+ appendChildren(actions,
+   makeButton("Manage Users", "primary", () => navigate("users")),
+   makeButton("Pharmacy", "secondary", () => navigate("pharmacy")),
+   makeButton("Home Services", "secondary", () => navigate("home-services")),
+   makeButton("Laboratory", "secondary", () => navigate("laboratory"))
+ );
+ adminCard.append(quickTitle, actions);
 
-
-<h1 class="page-title">
-  Administrator Dashboard
-</h1>
-
-<p class="text-muted">
-  Complete operational overview.
-</p>
-
-<div class="grid grid-4">
-
-  <div class="stat-card">
-    <div class="stat-title">
-      Patients
-    </div>
-    <div class="stat-number">
-      ${patients}
-    </div>
-  </div>
-
-  <div class="stat-card">
-    <div class="stat-title">
-      Doctors
-    </div>
-    <div class="stat-number">
-      ${doctors}
-    </div>
-  </div>
-
-  <div class="stat-card">
-    <div class="stat-title">
-      Pending Payments
-    </div>
-    <div class="stat-number">
-      ${pendingPayments}
-    </div>
-  </div>
-
-  <div class="stat-card">
-    <div class="stat-title">
-      Paid Deliveries
-    </div>
-    <div class="stat-number">
-      ${paidDeliveries}
-    </div>
-  </div>
-
-</div>
-
-<br>
-
-<div class="grid grid-4">
-
-  <div class="stat-card">
-    <div class="stat-title">
-      Pharmacy Orders
-    </div>
-    <div class="stat-number">
-      ${pharmacyOrders}
-    </div>
-  </div>
-
-  <div class="stat-card">
-    <div class="stat-title">
-      Home Services
-    </div>
-    <div class="stat-number">
-      ${homeRequests}
-    </div>
-  </div>
-
-  <div class="stat-card">
-    <div class="stat-title">
-      Laboratory Requests
-    </div>
-    <div class="stat-number">
-      ${db.labRequests.length}
-    </div>
-  </div>
-
-  <div class="stat-card">
-    <div class="stat-title">
-      Revenue
-    </div>
-    <div class="stat-number">
-      ${money(revenue)}
-    </div>
-  </div>
-
-</div>
-
-<br>
-
-<div class="grid grid-2">
-
-  <div class="card">
-
-    <h3>Financial Analysis</h3>
-
-    <table>
-
-      <tr>
-        <th>Type</th>
-        <th>Paid</th>
-        <th>Revenue</th>
-      </tr>
-
-      ${adminRevenueRows()}
-
-    </table>
-
-  </div>
-
-  <div class="card">
-
-    <h3>Important Workflow</h3>
-
-    <div class="alert alert-success">
-      When a patient pays a delivery invoice,
-      the order appears immediately in the
-      <strong>Pharmacy Dispatch & Rider Assignment</strong>
-      section.
-    </div>
-
-    <div class="alert alert-info">
-      The pharmacist can then mark the paid medicine
-      order as <strong>Ready / Dispatched</strong>.
-    </div>
-
-    <button
-      class="btn btn-primary"
-      onclick="navigate('admin-orders')"
-    >
-      Open Dispatch Queue
-    </button>
-
-  </div>
-
-</div>
-
-<div class="card">
-
-  <h3>Quick Administration</h3>
-
-  <div class="flex">
-
-    <button
-      class="btn btn-primary"
-      onclick="navigate('users')"
-    >
-      Manage Users
-    </button>
-
-    <button
-      class="btn btn-secondary"
-      onclick="navigate('pharmacy')"
-    >
-      Pharmacy
-    </button>
-
-    <button
-      class="btn btn-secondary"
-      onclick="navigate('home-services')"
-    >
-      Home Services
-    </button>
-
-    <button
-      class="btn btn-secondary"
-      onclick="navigate('laboratory')"
-    >
-      Laboratory
-    </button>
-
-  </div>
-
-</div>
-
-`;
+ appendChildren(content, title, subtitle, stats, createElement("br"), stats2, createElement("br"), grid, adminCard);
 }
 
 function adminRevenueRows(){
-
-const types=[
-"Consultation",
-"Pharmacy",
-"Delivery",
-"Home Service",
-"Laboratory"
-];
-
-return types.map(type=>{
-
-
-const invoices =
-  db.invoices.filter(
-    i=>i.type===type
-  );
-
-const paid =
-  invoices.filter(
-    i=>i.status==="Paid"
-  );
-
-const total =
-  paid.reduce(
-    (sum,i)=>sum+Number(i.total),
-    0
-  );
-
-return`
-
-  <tr>
-
-    <td>${type}</td>
-
-    <td>${paid.length}</td>
-
-    <td>${money(total)}</td>
-
-  </tr>
-`;
-
-}).join("");
+ const types = ["Consultation", "Pharmacy", "Delivery", "Home Service", "Laboratory"];
+ return types.map(type => {
+   const invoices = db.invoices.filter(i => i.type === type);
+   const paid = invoices.filter(i => i.status === "Paid");
+   const total = paid.reduce((sum, i) => sum + Number(i.total), 0);
+   return `
+     <tr>
+       <td>${type}</td>
+       <td>${paid.length}</td>
+       <td>${money(total)}</td>
+     </tr>
+   `;
+ }).join("");
 }
 
-/* PATIENT DASHBOARD */
+function renderPatientDashboard(){
+ const content = makePageContent();
+ const appointments = db.appointments.filter(a => a.patientId === currentUser.id);
+ const invoices = db.invoices.filter(i => i.patientId === currentUser.id && i.status === "Pending");
+ const deliveries = db.deliveries.filter(d => d.patientId === currentUser.id && d.status !== "Delivered");
+ const homeCount = db.homeServices.filter(s => s.patientId === currentUser.id).length;
 
-function originalRenderPatientDashboard(){
+ appendChildren(content,
+   createElement("h1", "page-title", `Welcome, ${currentUser.name}`),
+   makeAlert("Manage appointments, prescriptions, laboratory services, home services, payments and deliveries from one place.", "info"),
+   createElement("div", "grid grid-4"),
+   createElement("br")
+ );
 
-const appointments =
-db.appointments.filter(
-a=>a.patientId===currentUser.id
-);
+ const stats = content.querySelector(".grid.grid-4");
+ appendChildren(stats,
+   makeStatCard("Appointments", String(appointments.length)),
+   makeStatCard("Unpaid Invoices", String(invoices.length)),
+   makeStatCard("Active Deliveries", String(deliveries.length)),
+   makeStatCard("Home Services", String(homeCount))
+ );
 
-const invoices =
-db.invoices.filter(
-i=>
-i.patientId===currentUser.id &&
-i.status==="Pending"
-);
-
-const deliveries =
-db.deliveries.filter(
-d=>
-d.patientId===currentUser.id &&
-d.status!=="Delivered"
-);
-
-document.getElementById(
-"content"
-).innerHTML=`
-
-
-<h1 class="page-title">
-  Welcome, ${escapeHTML(currentUser.name)}
-</h1>
-
-<div class="alert alert-info">
-  Manage appointments, prescriptions, laboratory
-  services, home services, payments and deliveries
-  from one place.
-</div>
-
-<div class="grid grid-4">
-
-  <div class="stat-card">
-    <div class="stat-title">
-      Appointments
-    </div>
-    <div class="stat-number">
-      ${appointments.length}
-    </div>
-  </div>
-
-  <div class="stat-card">
-    <div class="stat-title">
-      Unpaid Invoices
-    </div>
-    <div class="stat-number">
-      ${invoices.length}
-    </div>
-  </div>
-
-  <div class="stat-card">
-    <div class="stat-title">
-      Active Deliveries
-    </div>
-    <div class="stat-number">
-      ${deliveries.length}
-    </div>
-  </div>
-
-  <div class="stat-card">
-    <div class="stat-title">
-      Home Services
-    </div>
-    <div class="stat-number">
-      ${
-        db.homeServices.filter(
-          s=>s.patientId===currentUser.id
-        ).length
-      }
-    </div>
-  </div>
-
-</div>
-
-<br>
-
-<div class="grid grid-2">
-
-  <div class="card">
-
-    <h3>Quick Actions</h3>
-
-    <div class="grid grid-2">
-
-      <button
-        class="btn btn-primary"
-        onclick="navigate('appointments')"
-      >
-        📅 Book Doctor
-      </button>
-
-      <button
-        class="btn btn-primary"
-        onclick="navigate('home-services')"
-      >
-        🏠 Home Service
-      </button>
-
-      <button
-        class="btn btn-secondary"
-        onclick="navigate('laboratory')"
-      >
-        🧪 Lab Request
-      </button>
-
-      <button
-        class="btn btn-secondary"
-        onclick="navigate('deliveries')"
-      >
-        🚚 Delivery Status
-      </button>
-
-      <button
-        class="btn btn-secondary"
-        onclick="navigate('invoices')"
-      >
-        💳 Pay Invoice
-      </button>
-
-    </div>
-
-  </div>
-
-
-
-</div>
-
-`;
+ const quickWrap = createElement("div", "grid grid-2");
+ const quickCard = createElement("div", "card");
+ quickCard.appendChild(createElement("h3", null, "Quick Actions"));
+ const quickButtons = createElement("div", "grid grid-2");
+ appendChildren(quickButtons,
+   makeButton("📅 Book Doctor", "primary", () => navigate("appointments")),
+   makeButton("🏠 Home Service", "primary", () => navigate("home-services")),
+   makeButton("🧪 Lab Request", "secondary", () => navigate("laboratory")),
+   makeButton("🚚 Delivery Status", "secondary", () => navigate("deliveries")),
+   makeButton("💳 Pay Invoice", "secondary", () => navigate("invoices"))
+ );
+ quickCard.appendChild(quickButtons);
+ quickWrap.appendChild(quickCard);
+ content.appendChild(quickWrap);
 }
-
-/* DOCTOR DASHBOARD */
 
 function renderDoctorDashboard(){
+ const content = makePageContent();
+ const appointments = db.appointments.filter(a =>
+   a.doctorId === currentUser.id && (a.date === today() || a.status === "Confirmed")
+ ).sort((a, b) => `${a.date}T${a.time || "00:00"}`.localeCompare(`${b.date}T${b.time || "00:00"}`));
+ const max = Number(currentUser.maxBookingsPerDay || 10);
 
-const appointments =
-db.appointments.filter(
-a=>
-a.doctorId===currentUser.id &&
-(
-a.date===today() ||
-  a.status==="Confirmed"
-)
-).sort((a,b)=>{
-  const da=`${a.date}T${a.time||"00:00"}`;
-  const dbb=`${b.date}T${b.time||"00:00"}`;
-  return da.localeCompare(dbb);
-});
+ appendChildren(content,
+   createElement("h1", "page-title", "Doctor Dashboard"),
+   makeAlert(`Specialty: <strong>${escapeHTML(currentUser.specialty || "General Doctor")}</strong><br>Consultation duration: <strong>Maximum 45 minutes</strong>.`, "info"),
+   createElement("div", "grid grid-4")
+ );
 
-const max =
-Number(
-currentUser.maxBookingsPerDay||10
-);
+ const stats = content.querySelector(".grid.grid-4");
+ appendChildren(stats,
+   makeStatCard("Appointments", String(appointments.length)),
+   makeStatCard("Maximum Per Day", String(max)),
+   makeStatCard("Remaining", String(Math.max(0, max - appointments.length))),
+   makeStatCard("Prescriptions", String(db.prescriptions.filter(p => p.doctorId === currentUser.id).length))
+ );
 
-document.getElementById(
-"content"
-).innerHTML=`
-
-
-<h1 class="page-title">
-  Doctor Dashboard
-</h1>
-
-<div class="alert alert-info">
-
-  Specialty:
-  <strong>
-    ${escapeHTML(
-      currentUser.specialty ||
-      "General Doctor"
-    )}
-  </strong>
-
-  <br>
-
-  Consultation duration:
-  <strong>Maximum 45 minutes</strong>.
-
-</div>
-
-<div class="grid grid-4">
-
-  <div class="stat-card">
-    <div class="stat-title">
-      Appointments
-    </div>
-    <div class="stat-number">
-      ${appointments.length}
-    </div>
-  </div>
-
-  <div class="stat-card">
-    <div class="stat-title">
-      Maximum Per Day
-    </div>
-    <div class="stat-number">
-      ${max}
-    </div>
-  </div>
-
-  <div class="stat-card">
-    <div class="stat-title">
-      Remaining
-    </div>
-    <div class="stat-number">
-      ${Math.max(0,max-appointments.length)}
-    </div>
-  </div>
-
-  <div class="stat-card">
-    <div class="stat-title">
-      Prescriptions
-    </div>
-    <div class="stat-number">
-      ${
-        db.prescriptions.filter(
-          p=>p.doctorId===currentUser.id
-        ).length
-      }
-    </div>
-  </div>
-
-</div>
-
-<br>
-
-<div class="card">
-
-  <h3>Appointments</h3>
-
-  ${
-    appointments.length
-    ? appointmentTable(appointments)
-    : `<div class="empty">
-         No appointments today.
-       </div>`
-  }
-
-</div>
-
-`;
+ const card = createElement("div", "card");
+ card.appendChild(createElement("h3", null, "Appointments"));
+ if (appointments.length) {
+   card.appendChild(createAppointmentTableElement(appointments));
+ } else {
+   const empty = createElement("div", "empty", "No appointments today.");
+   card.appendChild(empty);
+ }
+ content.appendChild(card);
 }
 
 /* PHARMACIST DASHBOARD */
@@ -5299,7 +4143,7 @@ currentUser.role==="patient"
 
 }
 
-function handlePaidInvoice(
+function __baseHandlePaidInvoice(
 invoice
 ){
 
@@ -8541,6 +7385,9 @@ document.getElementById(
       <option value="pharmacist">
         Pharmacist
       </option>
+      <option value="lab_technician">
+        Laboratory Technician
+      </option>
 
       <option value="rider">
         Rider
@@ -10604,7 +9451,7 @@ function navigate(page){
 }
 
 // ---- Payment handler extension for Home Assessment invoices ----
-const __previousHandlePaidInvoice=handlePaidInvoice;
+const __previousHandlePaidInvoice=__baseHandlePaidInvoice;
 function handlePaidInvoice(invoice){
   if(invoice.type==="Home Assessment"){
     const a=db.homeServices.find(s=>s.invoiceId===invoice.id||s.id===invoice.homeServiceId);
@@ -10635,10 +9482,9 @@ window.addEventListener("storage", function(event){
 // Persist migrations immediately.
 saveDB();
 
-</script>
 
 
-<script>
+
 /* FINAL MEDICINE DELIVERY WORKFLOW OVERRIDE
    Patient pays medicine -> pharmacist confirms initial delivery details/fee ->
    patient pays delivery -> pharmacy sees PAID -> pharmacist assigns rider ->
@@ -10784,9 +9630,9 @@ function renderRiderDashboard(){
 
 function renderRiderMap(){ alert("GPS/map tracking is not used in the current medicine delivery workflow. Use Medicine Deliveries to manage pickup, phone confirmation and delivery status."); }
 function trackDelivery(){ alert("Live GPS tracking is not used. The rider confirms the patient's location and directions by phone before starting delivery."); }
-</script>
 
-<script>
+
+
 /* =========================================================
    BEACON OF HOPE — FINAL MEDICINE DELIVERY WORKFLOW
    1. Patient pays medicine.
@@ -11707,7 +10553,1509 @@ function trackDelivery(){ alert("Live GPS tracking is not used. The rider confir
   };
 
 })();
-</script>
 
-</body>
-</html>
+
+
+/* =========================================================
+   V8 ENHANCEMENTS
+   1. Laboratory Technician role (sees every lab request)
+   2. Notification engine: bell + unread badge, live toasts,
+      "while you were away" digest on login, browser alerts,
+      and an SMS/e-mail message log (gateway hook included)
+   3. Random, overlap-free assignment of doctors and nurses
+   4. Clinical notes saved per patient + patient history
+   5. Live captions / transcription / translation in consultations
+   All overrides use window.X = function(){} and capture the
+   previous version first, so nothing can recurse into itself.
+========================================================= */
+(function(){
+"use strict";
+
+const ROLE_LAB = "lab_technician";
+const HOME_VISIT_MINUTES = 90;      /* a home visit blocks the nurse for this long */
+const APPT_MINUTES = 45;
+const V8 = window.V8 = {labFilter:"all", labQuery:"", notifScope:"mine", session:null, wideNext:false, recAll:false, translators:{}};
+
+/* ---------- small helpers ---------- */
+function $(id){ return document.getElementById(id); }
+function esc(v){ return escapeHTML(v); }
+function fmtDT(iso){ try{ return new Date(iso).toLocaleString([], {dateStyle:"medium", timeStyle:"short"}); }catch(e){ return iso||""; } }
+function fmtClock(iso){ try{ return new Date(iso).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"}); }catch(e){ return ""; } }
+function pickRandom(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+function roleName(r){ return r===ROLE_LAB ? "Laboratory Technician" : formatRole(r); }
+function ensureDB(){
+  ["outbox","notifications","labRequests","consultations","appointments","homeServices","invoices","doctorDaysOff","prescriptions","pharmacyOrders"].forEach(k=>{ if(!Array.isArray(db[k])) db[k]=[]; });
+}
+ensureDB();
+
+/* Pull the latest bookings written by other tabs before we decide who is free. */
+function rawSyncBookings(){
+  try{
+    const raw = localStorage.getItem(DB_KEY); if(!raw) return;
+    const fresh = JSON.parse(raw);
+    ["appointments","homeServices"].forEach(k=>{ if(Array.isArray(fresh[k])) db[k] = fresh[k]; });
+  }catch(e){}
+}
+function syncBookings(){ rawSyncBookings(); releaseStaleBookings(); }   /* also frees slots held by unpaid bookings */
+
+/* =========================================================
+   FORMAT ROLE + DASHBOARD + SIDEBAR
+========================================================= */
+window.formatRole = function(role){
+  const map = {admin:"Administrator", doctor:"Doctor", nurse:"Nursing Officer", pharmacist:"Pharmacist", rider:"Rider", patient:"Patient"};
+  map[ROLE_LAB] = "Laboratory Technician";
+  return map[role] || role;
+};
+
+const prevBuildSidebar = window.buildSidebar;
+window.buildSidebar = function(){
+  if(currentUser && currentUser.role===ROLE_LAB){
+    $("sidebar").innerHTML = `
+      <div class="sidebar-section">Main</div>
+      <button data-page="dashboard" onclick="navigate('dashboard')">🏠 Dashboard</button>
+      <div class="sidebar-section">Laboratory</div>
+      <button data-page="laboratory" onclick="navigate('laboratory')">🧪 All Lab Requests</button>
+      <button data-page="notifications" onclick="navigate('notifications')">🔔 Notifications</button>
+      <div class="sidebar-section">Account</div>
+      <button data-page="profile" onclick="navigate('profile')">👤 My Profile</button>`;
+  }else{
+    prevBuildSidebar();
+    if(currentUser && currentUser.role==="doctor" && !document.querySelector('#sidebar [data-page="patient-records"]')){
+      const anchor = document.querySelector('#sidebar [data-page="consultation"]');
+      const b = document.createElement("button");
+      b.setAttribute("data-page","patient-records"); b.setAttribute("onclick","navigate('patient-records')");
+      b.textContent = "📋 Patient Records";
+      if(anchor) anchor.after(b); else $("sidebar").appendChild(b);
+    }
+    if(currentUser && currentUser.role==="doctor" && !document.querySelector('#sidebar [data-page="days-off"]')){
+      const anchor = document.querySelector('#sidebar [data-page="doctor-settings"]');
+      const b = document.createElement("button");
+      b.setAttribute("data-page","days-off"); b.setAttribute("onclick","navigate('days-off')");
+      b.textContent = "🏖 Days Off";
+      if(anchor) anchor.after(b); else $("sidebar").appendChild(b);
+    }
+    if(currentUser && currentUser.role==="admin" && !document.querySelector('#sidebar [data-page="outbox"]')){
+      const anchor = document.querySelector('#sidebar [data-page="notifications"]');
+      const b = document.createElement("button");
+      b.setAttribute("data-page","outbox"); b.setAttribute("onclick","navigate('outbox')");
+      b.textContent = "📨 Message Log (SMS/Email)";
+      if(anchor) anchor.after(b); else $("sidebar").appendChild(b);
+    }
+  }
+  refreshBell();
+};
+
+const prevRenderDashboard = window.renderDashboard;
+window.renderDashboard = function(){
+  if(currentUser && currentUser.role===ROLE_LAB){ renderLabDashboard(); return; }
+  prevRenderDashboard();
+};
+
+const prevNavigate = window.navigate;
+window.navigate = function(page){
+  const custom = {"patient-records":["doctor",renderPatientRecords], "days-off":["doctor",renderDaysOff], "outbox":["admin",renderOutbox]};
+  if(custom[page] && currentUser && currentUser.role===custom[page][0]){
+    currentPage = page;
+    document.querySelectorAll(".sidebar button[data-page]").forEach(b=>b.classList.toggle("active", b.dataset.page===page));
+    $("sidebar")?.classList.remove("open");
+    try{ custom[page][1](); }catch(err){ console.error(err); $("content").innerHTML = `<div class="card"><div class="alert alert-danger">Unable to load this page: ${esc(err.message)}</div></div>`; }
+    refreshBell();
+    return;
+  }
+  prevNavigate(page);
+  refreshBell();
+};
+
+/* Modal: make the consultation room wider, reset for every other modal. */
+const prevOpenModal = window.openModal;
+window.openModal = function(){
+  const mc = $("modalContent");
+  if(mc){ if(V8.wideNext) mc.classList.add("v8-wide"); else mc.classList.remove("v8-wide"); }
+  V8.wideNext = false;
+  prevOpenModal();
+};
+const prevCloseModal = window.closeModal;
+window.closeModal = function(){
+  stopSession();
+  prevCloseModal();
+  $("modalContent")?.classList.remove("v8-wide");
+};
+
+const prevLogout = window.logout;
+window.logout = function(){ stopSession(); prevLogout(); };
+
+/* =========================================================
+   NOTIFICATION ENGINE
+========================================================= */
+const TYPE_ICON = {booking:"📅", lab:"🧪", reminder:"⏰", result:"🧾", home:"🏠", info:"🔔", alert:"⚠️", consult:"🎥", payment:"💳"};
+function iconFor(t){ return TYPE_ICON[t] || "🔔"; }
+V8.seen = new Set();                       /* notification ids already shown/known on this device */
+function markSeen(){ db.notifications.forEach(n=>V8.seen.add(n.id)); }
+function unreadFor(userId){ return db.notifications.filter(n=>n.userId===userId && !n.read); }
+
+/* Hospitals normally push alerts to a provider's phone. This demo has no SMS/email
+   gateway, so every alert is also written to db.outbox (see admin "Message Log").
+   To go live, set window.SEND_EXTERNAL_ALERT = function(user, message, entry){...}
+   to call your SMS/email/push provider from a backend. */
+function queueExternalAlert(userId, message, type){
+  const u = getUser(userId); if(!u) return;
+  const entry = {
+    id: uid("msg"), userId, role:u.role, name:u.name, type,
+    channel: u.phone && u.email ? "SMS + Email" : (u.phone ? "SMS" : "Email"),
+    to: [u.phone, u.email].filter(Boolean).join(" / "),
+    message, createdAt:new Date().toISOString(),
+    status: typeof window.SEND_EXTERNAL_ALERT==="function" ? "Sent to gateway" : "Queued (demo – no gateway connected)"
+  };
+  db.outbox.push(entry);
+  if(db.outbox.length>400) db.outbox.splice(0, db.outbox.length-400);
+  if(typeof window.SEND_EXTERNAL_ALERT==="function"){ try{ window.SEND_EXTERNAL_ALERT(u, message, entry); }catch(e){ entry.status="Gateway error"; } }
+}
+
+window.notify = function(userId, message, type){
+  type = type || "info";
+  const n = {id:uid("notification"), userId, message, type, createdAt:new Date().toISOString(), read:false};
+  db.notifications.push(n);
+  queueExternalAlert(userId, message, type);
+  saveDB();
+  V8.seen.add(n.id);
+  if(currentUser && currentUser.id===userId) pushToast(n);
+  refreshBell();
+};
+
+function toastHost(){
+  let h = $("v8Toasts");
+  if(!h){ h = document.createElement("div"); h.id = "v8Toasts"; document.body.appendChild(h); }
+  return h;
+}
+function pushToast(n){
+  const h = toastHost();
+  const el = document.createElement("div");
+  el.className = "v8-toast";
+  el.innerHTML = `<div class="v8-toast-title">${iconFor(n.type)} New notification</div><div>${esc(n.message)}</div><div class="v8-toast-time">Just now · click to open</div>`;
+  el.onclick = ()=>{ el.remove(); navigate("notifications"); };
+  h.appendChild(el);
+  setTimeout(()=>el.remove(), 10000);
+  while(h.children.length>4) h.firstChild.remove();
+  try{
+    if(document.hidden && "Notification" in window && Notification.permission==="granted"){
+      new Notification("Beacon of Hope Hospital", {body:n.message});
+    }
+  }catch(e){}
+}
+
+function ensureBell(){
+  const area = document.querySelector(".user-area");
+  if(!area || $("v8Bell")) return;
+  const b = document.createElement("button");
+  b.id = "v8Bell"; b.className = "v8-bell"; b.type = "button"; b.title = "Notifications";
+  b.setAttribute("onclick","navigate('notifications')");
+  b.innerHTML = `🔔<span id="v8BellCount" class="v8-bell-count hidden">0</span>`;
+  area.insertBefore(b, area.children[1] || null);
+}
+function refreshBell(){
+  if(!currentUser) return;
+  ensureBell();
+  const n = unreadFor(currentUser.id).length;
+  const c = $("v8BellCount");
+  if(c){ c.textContent = n>99 ? "99+" : n; c.classList.toggle("hidden", n===0); }
+  document.querySelectorAll('#sidebar button[data-page="notifications"]').forEach(btn=>{
+    btn.querySelectorAll(".v8-badge").forEach(x=>x.remove());
+    if(n>0){ const s = document.createElement("span"); s.className = "v8-badge"; s.textContent = n>99 ? "99+" : n; btn.appendChild(s); }
+  });
+  document.title = (n>0 ? `(${n}) ` : "") + "Beacon of Hope Hospital | Telemedicine";
+}
+
+function showDigest(){
+  if(!currentUser || !$("modal")?.classList.contains("hidden")) return;   /* never replace a modal that is already open */
+  const list = unreadFor(currentUser.id);
+  if(!list.length) return;
+  const shown = list.slice().reverse().slice(0,6);
+  $("modalContent").innerHTML = `
+    <h2>🔔 You have ${list.length} new notification${list.length>1?"s":""}</h2>
+    <p class="text-muted">These arrived while you were away.</p>
+    ${shown.map(n=>`<div class="alert alert-info"><strong>${iconFor(n.type)} ${esc(fmtDT(n.createdAt))}</strong><br>${esc(n.message)}</div>`).join("")}
+    ${list.length>shown.length ? `<p class="small text-muted">…and ${list.length-shown.length} more.</p>` : ""}
+    <button class="btn btn-primary" onclick="closeModal();navigate('notifications')">Open notifications</button>
+    <button class="btn btn-secondary" onclick="closeModal()">Dismiss</button>`;
+  openModal();
+}
+
+const prevOpenApp = window.openApp;
+window.openApp = function(){
+  prevOpenApp();
+  markSeen();
+  ensureBell(); refreshBell();
+  startTick();
+  try{ if("Notification" in window && Notification.permission==="default") Notification.requestPermission(); }catch(e){}
+  setTimeout(showDigest, 350);
+};
+
+/* Live updates from other tabs/devices sharing this browser profile. */
+window.addEventListener("storage", function(ev){
+  if(ev.key!==DB_KEY || !ev.newValue || !currentUser) return;
+  let fresh; try{ fresh = JSON.parse(ev.newValue); }catch(e){ return; }
+  db = fresh; ensureDB();
+  (db.notifications||[]).filter(n=>n.userId===currentUser.id && !n.read && !V8.seen.has(n.id)).forEach(n=>{ V8.seen.add(n.id); pushToast(n); });
+  refreshBell();
+  const modalOpen = !$("modal")?.classList.contains("hidden");
+  const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName||"");
+  if(!modalOpen && !typing && ["dashboard","notifications","laboratory","appointments","consultation","patient-records"].includes(currentPage)){
+    navigate(currentPage);
+  }
+});
+
+window.renderNotifications = function(){
+  const me = currentUser, isAdmin = me.role==="admin";
+  const all = isAdmin && V8.notifScope==="all";
+  const list = (all ? db.notifications : db.notifications.filter(n=>n.userId===me.id)).slice().reverse();
+  const unreadCount = unreadFor(me.id).length;
+  $("content").innerHTML = `
+    <h1 class="page-title">Notifications
+      <span class="flex">
+        ${isAdmin ? `<button class="btn ${all?"btn-secondary":"btn-primary"}" onclick="V8.notifScope='mine';renderNotifications()">Mine</button>
+                     <button class="btn ${all?"btn-primary":"btn-secondary"}" onclick="V8.notifScope='all';renderNotifications()">All hospital activity</button>` : ""}
+        ${unreadCount ? `<button class="btn btn-secondary" onclick="v8MarkAllRead()">Mark all as read</button>` : ""}
+      </span>
+    </h1>
+    <div class="card">
+      ${list.length ? list.map(n=>{
+        const who = all ? getUser(n.userId) : null;
+        return `<div class="alert ${n.read?"alert-info v8-read":"alert-info v8-unread"}">
+          <strong>${iconFor(n.type)} ${esc(fmtDT(n.createdAt))}</strong>${!n.read?` <span class="badge badge-danger">NEW</span>`:""}
+          ${who ? `<span class="badge badge-dark">${esc(who.name)} · ${esc(roleName(who.role))}</span>` : ""}
+          <br>${esc(n.message)}</div>`;
+      }).join("") : `<div class="empty">No notifications.</div>`}
+    </div>`;
+  /* Opening the inbox marks the user's own notifications as read (the NEW tags stay for this view). */
+  let changed = false;
+  db.notifications.forEach(n=>{ if(n.userId===me.id && !n.read){ n.read = true; changed = true; } });
+  if(changed){ saveDB(); refreshBell(); }
+};
+window.v8MarkAllRead = function(){
+  db.notifications.forEach(n=>{ if(n.userId===currentUser.id) n.read = true; });
+  saveDB(); refreshBell(); renderNotifications();
+};
+
+function renderOutbox(){
+  const rows = db.outbox.slice().reverse().slice(0,150);
+  $("content").innerHTML = `
+    <h1 class="page-title">Message Log (SMS / Email)</h1>
+    <div class="alert alert-warning"><strong>Demo mode:</strong> alerts are recorded here exactly as they would be sent to each person's phone and email, so providers are reached even before they open their dashboard.
+      No SMS/email gateway is connected in this standalone file. A developer can connect one by defining <code>window.SEND_EXTERNAL_ALERT(user, message, entry)</code> (e.g. Africa's Talking, Twilio, or an email API called from a server).</div>
+    <div class="card"><div class="table-wrap"><table>
+      <thead><tr><th>Time</th><th>Recipient</th><th>Channel</th><th>To</th><th>Message</th><th>Status</th></tr></thead>
+      <tbody>${rows.length ? rows.map(m=>`<tr><td>${esc(fmtDT(m.createdAt))}</td><td>${esc(m.name)}<div class="small text-muted">${esc(roleName(m.role))}</div></td><td>${esc(m.channel)}</td><td class="small">${esc(m.to)}</td><td>${esc(m.message)}</td><td><span class="badge badge-dark">${esc(m.status)}</span></td></tr>`).join("") : `<tr><td colspan="6"><div class="empty">No messages yet.</div></td></tr>`}</tbody>
+    </table></div></div>`;
+}
+
+/* Wrap payments so lab staff and ordering doctors are alerted when a test is paid for. */
+const prevHandlePaid = window.handlePaidInvoice;
+window.handlePaidInvoice = function(invoice){
+  prevHandlePaid(invoice);
+  try{
+    if(invoice && invoice.type==="Laboratory"){
+      const r = db.labRequests.find(l=>l.invoiceId===invoice.id);
+      if(r){
+        const p = getUser(r.patientId);
+        db.users.filter(u=>u.role===ROLE_LAB && u.enabled).forEach(t=>notify(t.id, `LAB PAID – ready to process: ${r.testName} for ${p?.name||"patient"} (request ${r.id}).`, "lab"));
+        if(r.requestedBy) notify(r.requestedBy, `Lab payment received for ${p?.name||"your patient"}: ${r.testName}. The lab will now process it.`, "lab");
+      }
+    }
+  }catch(e){ console.error(e); }
+};
+
+/* =========================================================
+   LABORATORY TECHNICIAN
+========================================================= */
+function labInvoice(r){ return db.invoices.find(i=>i.id===r.invoiceId) || db.invoices.find(i=>i.labRequestId===r.id); }
+function labPaid(r){
+  const inv = labInvoice(r);
+  return !!(inv && inv.status==="Paid") || /^Paid/.test(r.status||"") || r.status==="Processing" || r.status==="Completed";
+}
+function labStage(r){
+  if(r.status==="Completed") return {key:"completed", label:"Completed", cls:"badge-success"};
+  if(r.status==="Processing") return {key:"progress", label:"In Progress", cls:"badge-info"};
+  if(labPaid(r)) return {key:"ready", label:"Ready to Process", cls:"badge-warning"};
+  return {key:"unpaid", label:"Awaiting Payment", cls:"badge-dark"};
+}
+function labRequestsFor(user){
+  if(user.role===ROLE_LAB || user.role==="admin") return db.labRequests.slice();
+  if(user.role==="patient") return db.labRequests.filter(l=>l.patientId===user.id);
+  if(user.role==="doctor") return db.labRequests.filter(l=>l.requestedBy===user.id || (!l.requestedBy && getUser(l.patientId)?.role==="doctor"));
+  return [];
+}
+
+function renderLabDashboard(){
+  const all = db.labRequests.slice();
+  const c = {unpaid:0, ready:0, progress:0, completed:0};
+  all.forEach(r=>c[labStage(r).key]++);
+  const urgent = all.filter(r=>r.urgency==="Urgent" && labStage(r).key!=="completed" && labStage(r).key!=="unpaid").length;
+  const recent = all.slice().sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt))).slice(0,8);
+  $("content").innerHTML = `
+    <h1 class="page-title">Laboratory — ${esc(currentUser.name)}</h1>
+    <p class="text-muted">Every laboratory request raised by doctors appears here as soon as it is made.</p>
+    <div class="grid grid-4">
+      <div class="card"><div class="text-muted small">Ready to process</div><h1 style="margin:6px 0">${c.ready}</h1></div>
+      <div class="card"><div class="text-muted small">In progress</div><h1 style="margin:6px 0">${c.progress}</h1></div>
+      <div class="card"><div class="text-muted small">Awaiting payment</div><h1 style="margin:6px 0">${c.unpaid}</h1></div>
+      <div class="card"><div class="text-muted small">Completed</div><h1 style="margin:6px 0">${c.completed}</h1></div>
+    </div>
+    ${urgent ? `<div class="alert alert-danger"><strong>${urgent} urgent request${urgent>1?"s":""}</strong> waiting to be processed.</div>` : ""}
+    <div class="card">
+      <div class="flex space-between"><h3 style="margin:0">Latest requests</h3><button class="btn btn-primary" onclick="navigate('laboratory')">Open all requests</button></div>
+      ${labTableHTML(recent, ROLE_LAB)}
+    </div>`;
+}
+
+function labTableHTML(requests, role){
+  const isStaff = role===ROLE_LAB || role==="admin";
+  const head = isStaff
+    ? "<th>Request</th><th>Requested</th><th>Patient</th><th>Requested by</th><th>Test</th><th>Priority</th><th>Clinical notes</th><th>Payment</th><th>Stage</th><th>Action</th>"
+    : (role==="doctor"
+        ? "<th>Request</th><th>Requested</th><th>Patient</th><th>Test</th><th>Stage</th><th>Result</th><th>Action</th>"
+        : "<th>Request</th><th>Requested</th><th>Test</th><th>Stage</th><th>Result</th><th>Action</th>");
+  const cols = head.split("<th>").length-1;
+  const rows = requests.slice().sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt))).map(r=>{
+    const p = getUser(r.patientId), d = getUser(r.requestedBy), st = labStage(r), paid = labPaid(r);
+    const q = `${p?.name||""} ${r.testName||""} ${d?.name||""} ${r.id}`.toLowerCase();
+    const view = r.result && st.key==="completed" ? `<button class="btn btn-success" onclick="viewLabResult('${r.id}')">View Result</button>` : "";
+    let action = view;
+    if(role===ROLE_LAB){
+      if(st.key==="unpaid") action = `<span class="small text-muted">Waiting for payment</span>`;
+      else if(st.key==="completed") action = view;
+      else action = `<button class="btn btn-primary" onclick="processLab('${r.id}')">${st.key==="progress"?"Enter Result":"Process"}</button>`;
+    }
+    action += ` <button class="btn btn-secondary" onclick="v8PrintLab('${r.id}')">🖨 Print</button>`;
+    if(isStaff){
+      return `<tr data-stage="${st.key}" data-q="${esc(q)}"><td class="small">${esc(r.id.slice(-10))}</td><td>${esc(fmtDT(r.createdAt))}</td><td>${esc(p?.name||"-")}<div class="small text-muted">${esc(p?.phone||"")}</div></td>
+        <td>${esc(d?.name||"-")}</td><td>${esc(r.testName)}</td><td>${r.urgency==="Urgent"?`<span class="badge badge-danger">URGENT</span>`:`<span class="badge badge-dark">Routine</span>`}</td>
+        <td class="small">${esc(r.notes||"-")}</td><td><span class="badge ${paid?"badge-success":"badge-warning"}">${paid?"Paid":"Unpaid"}</span></td>
+        <td><span class="badge ${st.cls}">${st.label}</span></td><td>${action}</td></tr>`;
+    }
+    if(role==="doctor"){
+      return `<tr data-stage="${st.key}" data-q="${esc(q)}"><td class="small">${esc(r.id.slice(-10))}</td><td>${esc(fmtDT(r.createdAt))}</td><td>${esc(p?.name||"-")}</td><td>${esc(r.testName)}</td>
+        <td><span class="badge ${st.cls}">${st.label}</span></td><td>${r.result&&st.key==="completed"?"Available":"Pending"}</td><td>${action}</td></tr>`;
+    }
+    return `<tr data-stage="${st.key}" data-q="${esc(q)}"><td class="small">${esc(r.id.slice(-10))}</td><td>${esc(fmtDT(r.createdAt))}</td><td>${esc(r.testName)}</td>
+      <td><span class="badge ${st.cls}">${st.label}</span></td><td>${r.result&&st.key==="completed"?"Available":"Pending"}</td><td>${action}</td></tr>`;
+  }).join("");
+  return `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody id="labBody">${rows || `<tr><td colspan="${cols}"><div class="empty">No laboratory requests.</div></td></tr>`}</tbody></table></div>`;
+}
+
+window.v8LabFilter = function(key){ V8.labFilter = key; applyLabFilter(); document.querySelectorAll(".v8-chip").forEach(c=>c.classList.toggle("active", c.dataset.k===key)); };
+window.v8LabSearch = function(v){ V8.labQuery = (v||"").toLowerCase(); applyLabFilter(); };
+function applyLabFilter(){
+  document.querySelectorAll("#labBody tr[data-stage]").forEach(tr=>{
+    const okStage = V8.labFilter==="all" || tr.dataset.stage===V8.labFilter;
+    const okQ = !V8.labQuery || (tr.dataset.q||"").includes(V8.labQuery);
+    tr.style.display = okStage && okQ ? "" : "none";
+  });
+}
+
+window.renderLaboratory = function(){
+  const role = currentUser.role;
+  const requests = labRequestsFor(currentUser);
+  const counts = {all:requests.length, unpaid:0, ready:0, progress:0, completed:0};
+  requests.forEach(r=>counts[labStage(r).key]++);
+  const staff = role===ROLE_LAB || role==="admin";
+  const intro =
+    role===ROLE_LAB ? `<div class="alert alert-info">You can see <strong>all</strong> laboratory requests. Tests can be processed once the patient has paid.</div>` :
+    role==="doctor" ? `<div class="alert alert-info">Request tests for your patients. The laboratory technician is notified immediately and you are notified when the result is ready.</div>` :
+    role==="patient" ? `<div class="alert alert-info">Laboratory tests are requested by your doctor. Pay the laboratory invoice under Payments; results appear here once ready.</div>` : "";
+  $("content").innerHTML = `
+    <h1 class="page-title">Laboratory ${role==="doctor" ? `<button class="btn btn-primary" onclick="showLabForm()">+ Request Laboratory Test</button>` : ""}</h1>
+    ${intro}
+    <div class="card">
+      ${staff ? `<div class="flex" style="margin-bottom:12px">
+        ${[["all","All"],["ready","Ready to process"],["progress","In progress"],["unpaid","Awaiting payment"],["completed","Completed"]].map(([k,l])=>`<button type="button" class="v8-chip ${V8.labFilter===k?"active":""}" data-k="${k}" onclick="v8LabFilter('${k}')">${l} (${counts[k]})</button>`).join("")}
+        <input class="form-control" style="max-width:260px;margin-left:auto" placeholder="Search patient, test, doctor…" value="${esc(V8.labQuery)}" oninput="v8LabSearch(this.value)">
+      </div>` : ""}
+      ${labTableHTML(requests, role)}
+    </div>`;
+  applyLabFilter();
+};
+
+/* Doctor requests a test FOR a patient (the old form wrongly billed the doctor). */
+window.showLabForm = function(){
+  if(currentUser.role!=="doctor"){ alert("Only doctors can request laboratory tests."); return; }
+  const patients = db.users.filter(u=>u.role==="patient" && u.enabled);
+  const mine = new Set(db.appointments.filter(a=>a.doctorId===currentUser.id).map(a=>a.patientId));
+  const opt = p=>`<option value="${p.id}">${esc(p.name)} — ${esc(p.phone||"")}</option>`;
+  $("modalContent").innerHTML = `
+    <h2>Request Laboratory Test</h2>
+    <form onsubmit="createLabRequest(event)">
+      <div class="form-group"><label>Patient</label>
+        <select id="labPatient" class="form-control" required>
+          <option value="">Select patient</option>
+          ${patients.some(p=>mine.has(p.id)) ? `<optgroup label="My patients">${patients.filter(p=>mine.has(p.id)).map(opt).join("")}</optgroup>` : ""}
+          <optgroup label="${mine.size?"Other patients":"All patients"}">${patients.filter(p=>!mine.has(p.id)).map(opt).join("")}</optgroup>
+        </select></div>
+      <div class="grid grid-2">
+        <div class="form-group"><label>Laboratory Test</label>
+          <select id="labTest" class="form-control" required><option value="">Select test</option>${LAB_TESTS.map(t=>`<option value="${esc(t.name)}">${esc(t.name)} — ${money(t.price)}</option>`).join("")}</select></div>
+        <div class="form-group"><label>Priority</label>
+          <select id="labUrgency" class="form-control"><option>Routine</option><option>Urgent</option></select></div>
+      </div>
+      <div class="form-group"><label>Clinical indication / notes for the lab</label><textarea id="labNotes" class="form-control" rows="4" placeholder="e.g. fever for 3 days, suspected malaria"></textarea></div>
+      <div class="alert alert-info">The patient receives a laboratory invoice to pay. The laboratory technician sees the request immediately and processes it after payment.</div>
+      <button class="btn btn-primary">Submit Request</button><button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+    </form>`;
+  openModal();
+};
+
+window.createLabRequest = function(e){
+  e.preventDefault();
+  if(currentUser.role!=="doctor") return;
+  const patientId = $("labPatient").value, testName = $("labTest").value;
+  const patient = getUser(patientId), test = LAB_TESTS.find(t=>t.name===testName);
+  if(!patient || !test){ alert("Please select a patient and a test."); return; }
+  const urgency = $("labUrgency").value;
+  const request = {id:uid("lab"), patientId, requestedBy:currentUser.id, testName, notes:$("labNotes").value, urgency, status:"Requested", result:null, createdAt:new Date().toISOString()};
+  db.labRequests.push(request);
+  const invoice = {id:uid("invoice"), invoiceNumber:invoiceNumber("LAB"), type:"Laboratory", patientId, labRequestId:request.id,
+    items:[{description:testName, quantity:1, unitPrice:test.price}], total:test.price, status:"Pending", createdAt:new Date().toISOString()};
+  db.invoices.push(invoice); request.invoiceId = invoice.id;
+  db.users.filter(u=>u.role===ROLE_LAB && u.enabled).forEach(t=>notify(t.id, `${urgency==="Urgent"?"URGENT ":""}NEW LAB REQUEST: ${testName} for ${patient.name}, requested by ${currentUser.name}. Payment is pending.`, "lab"));
+  notify(patientId, `${currentUser.name} requested a laboratory test (${testName}). Please pay invoice ${invoice.invoiceNumber} so the lab can process it.`, "lab");
+  notifyAllAdmins(`New laboratory request ${request.id}: ${testName} for ${patient.name}.`);
+  saveDB(); closeModal();
+  alert("Laboratory request sent to the laboratory technician. The patient has been asked to pay the invoice.");
+  renderLaboratory();
+  pushActionToast("Lab request sent.", "🖨 Print request form", ()=>v8PrintLab(request.id));
+};
+
+window.processLab = function(requestId){
+  if(currentUser.role!==ROLE_LAB){ alert("Only the laboratory technician can process laboratory requests."); return; }
+  const r = db.labRequests.find(x=>x.id===requestId); if(!r) return;
+  if(!labPaid(r)){ alert("This request has not been paid for yet. It can be processed once the patient pays."); return; }
+  const p = getUser(r.patientId), d = getUser(r.requestedBy);
+  $("modalContent").innerHTML = `
+    <h2>Process Laboratory Request</h2>
+    <div class="card" style="margin-bottom:14px">
+      <p><strong>Test:</strong> ${esc(r.testName)} ${r.urgency==="Urgent"?`<span class="badge badge-danger">URGENT</span>`:""}</p>
+      <p><strong>Patient:</strong> ${esc(p?.name||"-")} (${esc(p?.phone||"-")})</p>
+      <p><strong>Requested by:</strong> ${esc(d?.name||"-")}</p>
+      <p style="margin:0"><strong>Clinical notes:</strong> ${esc(r.notes||"-")}</p>
+    </div>
+    <div class="form-group"><label>Status</label>
+      <select id="labStatus" class="form-control"><option ${r.status==="Processing"?"selected":""}>Processing</option><option>Completed</option></select></div>
+    <div class="form-group"><label>Result</label><textarea id="labResult" class="form-control" rows="7" placeholder="Enter findings, values and units…">${esc(r.result||"")}</textarea></div>
+    <button class="btn btn-primary" onclick="saveLab('${r.id}')">Save</button>
+    <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>`;
+  openModal();
+};
+
+window.saveLab = function(requestId){
+  if(currentUser.role!==ROLE_LAB) return;
+  const r = db.labRequests.find(x=>x.id===requestId); if(!r) return;
+  const status = $("labStatus").value, result = $("labResult").value.trim();
+  if(status==="Completed" && !result){ alert("Please enter the result before marking the test as completed."); return; }
+  r.status = status; r.result = result || null; r.resultDate = new Date().toISOString();
+  r.processedBy = currentUser.id; r.processedByName = currentUser.name;
+  const p = getUser(r.patientId);
+  if(status==="Completed"){
+    notify(r.patientId, `Your laboratory result for ${r.testName} is ready. Open Laboratory Results to view it.`, "result");
+    if(r.requestedBy) notify(r.requestedBy, `LAB RESULT READY: ${r.testName} for ${p?.name||"your patient"}.`, "result");
+  }else if(r.requestedBy){
+    notify(r.requestedBy, `Lab update: ${r.testName} for ${p?.name||"your patient"} is now being processed.`, "lab");
+  }
+  saveDB(); closeModal(); renderLaboratory();
+};
+
+window.viewLabResult = function(requestId){
+  const r = db.labRequests.find(x=>x.id===requestId); if(!r) return;
+  const p = getUser(r.patientId), d = getUser(r.requestedBy);
+  $("modalContent").innerHTML = `
+    <h2>Laboratory Result</h2>
+    <p><strong>${esc(r.testName)}</strong></p>
+    <p class="small text-muted">Patient: ${esc(p?.name||"-")} · Requested by: ${esc(d?.name||"-")}<br>
+      ${r.resultDate?`Resulted: ${esc(fmtDT(r.resultDate))}`:""} ${r.processedByName?` · Lab: ${esc(r.processedByName)}`:""}</p>
+    <div class="card" style="white-space:pre-wrap">${esc(r.result||"No result available.")}</div>
+    <button class="btn btn-primary" onclick="v8PrintLab('${r.id}')">🖨 Print</button>
+    <button class="btn btn-secondary" onclick="closeModal()">Close</button>`;
+  openModal();
+};
+
+/* =========================================================
+   RANDOM, OVERLAP-FREE ASSIGNMENT
+   Patients no longer pick a provider. The system picks one at random from
+   the providers who are genuinely free for the whole slot.
+========================================================= */
+function apptRange(a){
+  const s = timeToMinutes(a.time);
+  return [s, a.endTime ? timeToMinutes(a.endTime) : s+APPT_MINUTES];
+}
+function doctorIsFree(doc, date, time){
+  if(!doc || !doc.enabled) return false;
+  if(isDoctorOff(doc.id, date)) return false;                              /* doctor marked this day off */
+  if(doctorProviderBusy(doc.id, date, time)) return false;                 /* 45-min overlap check */
+  return getDoctorAppointments(doc.id, date).length < getDoctorMaxBookings(doc.id, date);   /* daily cap */
+}
+function freeDoctors(date, time){
+  return db.users.filter(u=>u.role==="doctor" && u.enabled && doctorIsFree(u, date, time));
+}
+function patientIsBusy(patientId, date, time, excludeId){
+  const s = timeToMinutes(time), e = s+APPT_MINUTES;
+  return db.appointments.some(a=>a.id!==excludeId && a.patientId===patientId && a.date===date && a.status!=="Cancelled" && overlap(s,e,...apptRange(a)));
+}
+function isPast(date, time){ return new Date(`${date}T${time}`) < new Date(); }
+
+/* Nearby times (same day) with at least one doctor free and the patient free. */
+function suggestSlots(date, time, patientId, excludeId, max){
+  const out = [];
+  const start = timeToMinutes(time);
+  for(let m=HOSPITAL_BOOKING_OPEN_MINUTES; m<=HOSPITAL_BOOKING_CLOSE_MINUTES - 0; m+=15){
+    const t = minutesToTime(m);
+    if(m===start || isPast(date,t)) continue;
+    if(patientId && patientIsBusy(patientId,date,t,excludeId)) continue;
+    if(freeDoctors(date,t).length) out.push({t, d:Math.abs(m-start)});
+  }
+  return out.sort((a,b)=>a.d-b.d).slice(0,max||4).map(x=>x.t).sort();
+}
+
+window.v8CheckSlot = function(){
+  const box = $("bookAvail"); if(!box) return;
+  const date = $("bookDate")?.value, time = $("bookTime")?.value;
+  if(!date || !time){ box.className="alert alert-info"; box.textContent="Choose a date and start time to check availability."; return; }
+  if(new Date(`${date}T00:00:00`).getDay()===0){ box.className="alert alert-warning"; box.textContent="No services on Sunday. Please choose Monday to Saturday."; return; }
+  const m = timeToMinutes(time);
+  if(m<HOSPITAL_BOOKING_OPEN_MINUTES || m>HOSPITAL_BOOKING_CLOSE_MINUTES){ box.className="alert alert-warning"; box.textContent="Services run 8:00 AM to 5:00 PM."; return; }
+  if(isPast(date,time)){ box.className="alert alert-warning"; box.textContent="That time has already passed. Please choose a future time."; return; }
+  syncBookings();
+  const n = freeDoctors(date,time).length;
+  if(n){
+    box.className = "alert alert-success";
+    box.innerHTML = `✅ A clinical provider is available for ${esc(time)}–${esc(addMinutesToTime(time,APPT_MINUTES))}. One will be assigned to you automatically.`;
+  }else{
+    const alt = suggestSlots(date,time,currentUser?.id,"",4);
+    box.className = "alert alert-warning";
+    box.innerHTML = `No provider is free at ${esc(time)}. ` + (alt.length
+      ? `Nearest available times: ${alt.map(t=>`<button type="button" class="v8-chip" onclick="v8UseTime('${t}')">${t}</button>`).join(" ")}`
+      : `Please try another date.`);
+  }
+};
+window.v8UseTime = function(t){ const i = $("bookTime"); if(i){ i.value = t; v8CheckSlot(); } };
+
+window.showBookingForm = function(){
+  const services = getActiveServices("Telemedicine / Consultation");
+  $("modalContent").innerHTML = `
+    <h2>Book an Appointment</h2>
+    <div class="alert alert-info"><strong>Consultation & follow-up fees</strong><br>Select the service you need. The fee is shown before you confirm.</div>
+    <div class="alert alert-warning"><strong>Automatic provider assignment:</strong> a clinical provider who is free for the full 45-minute slot is assigned to you at random, so appointments never overlap.<br><strong>Pay within 2 hours:</strong> unpaid bookings are released automatically so the slot can go to someone else.</div>
+    <form onsubmit="createAppointment(event)">
+      <div class="form-group"><label>Appointment Type</label><select id="bookType" class="form-control" required><option>Video Consultation</option><option>Audio Consultation</option><option>Physical Hospital Visit</option></select></div>
+      <div class="form-group"><label>Consultation / Follow-up Service</label>
+        <select id="bookConsultationService" class="form-control" onchange="updateConsultationFeeDisplay()" required>
+          <option value="">Select service</option>
+          ${services.map((x,i)=>`<option value="${i}">${esc(x.name)} — ${esc(x.priceLabel||money(x.price))}</option>`).join("")}
+        </select></div>
+      <div id="consultationFeeDisplay" class="alert alert-info" style="display:none"></div>
+      <div class="grid grid-2">
+        <div class="form-group"><label>Date</label><input id="bookDate" type="date" min="${today()}" class="form-control" onchange="v8CheckSlot()" required></div>
+        <div class="form-group"><label>Start Time</label><input id="bookTime" type="time" step="900" min="08:00" max="17:00" class="form-control" onchange="v8CheckSlot()" required></div>
+      </div>
+      <div id="bookAvail" class="alert alert-info">Choose a date and start time to check availability.</div>
+      <div class="form-group"><label>Reason / Notes (optional)</label><textarea id="bookReason" class="form-control" rows="3" placeholder="Brief reason for the visit"></textarea></div>
+      <button class="btn btn-primary">Book Appointment</button><button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+    </form>`;
+  openModal();
+  applyHospitalBookingWindow("bookDate","bookTime");
+};
+
+window.updateConsultationFeeDisplay = function(){
+  const sel = $("bookConsultationService"), box = $("consultationFeeDisplay"); if(!sel||!box) return;
+  const item = getActiveServices("Telemedicine / Consultation")[Number(sel.value)];
+  if(!item){ box.style.display="none"; return; }
+  box.style.display = "block";
+  box.innerHTML = `<strong>Selected service:</strong> ${esc(item.name)}<br><strong>Fee:</strong> ${esc(item.priceLabel||money(item.price))}`;
+};
+
+window.createAppointment = function(e){
+  e.preventDefault();
+  if(currentUser.role!=="patient"){ alert("Only patients can book appointments."); return; }
+  const type = $("bookType").value, date = $("bookDate").value, time = $("bookTime").value;
+  const svc = getActiveServices("Telemedicine / Consultation")[Number($("bookConsultationService")?.value)];
+  if(!date || !time || !svc){ alert("Please select the consultation/follow-up service, date and time."); return; }
+  if(!validateHospitalBookingWindow(date,time,"appointment")) return;
+  if(isPast(date,time)){ alert("Please choose a future date and time."); return; }
+  syncBookings();
+  if(patientIsBusy(currentUser.id,date,time)){ alert("You already have another appointment during this time."); return; }
+  const candidates = freeDoctors(date,time);
+  if(!candidates.length){
+    const alt = suggestSlots(date,time,currentUser.id,"",4);
+    alert(`No clinical provider is free at ${time} on ${date}.` + (alt.length ? ` Nearest available times: ${alt.join(", ")}.` : " Please try another date."));
+    v8CheckSlot(); return;
+  }
+  const doctor = pickRandom(candidates);                       /* ← random assignment */
+  const appointment = {id:uid("appointment"), patientId:currentUser.id, doctorId:doctor.id, autoAssigned:true,
+    specialty:doctor.specialty||"Clinical Provider", date, time, endTime:addMinutesToTime(time,APPT_MINUTES), durationMinutes:APPT_MINUTES,
+    type, consultationService:svc.name, consultationFee:svc.price, reason:$("bookReason")?.value||"", status:"Pending Payment", createdAt:new Date().toISOString()};
+  db.appointments.push(appointment);
+  const invoice = {id:uid("invoice"), invoiceNumber:invoiceNumber(type==="Physical Hospital Visit"?"PHYS":"CONS"), type:"Consultation", appointmentId:appointment.id, patientId:currentUser.id,
+    items:[{description:`${svc.name} — ${doctor.specialty||"Clinical Provider"}`, quantity:1, unitPrice:Number(svc.price)}], total:Number(svc.price), status:"Pending", paymentMethod:null, transactionReference:null, createdAt:new Date().toISOString()};
+  db.invoices.push(invoice);
+  /* Everybody concerned is alerted immediately – the provider does not need to be logged in. */
+  notify(doctor.id, `NEW APPOINTMENT ASSIGNED TO YOU: ${currentUser.name} – ${type} on ${date} at ${time} (${svc.name}). Awaiting patient payment.`, "booking");
+  notify(currentUser.id, `${type} booked for ${date} at ${time} with ${doctor.name}. Please pay invoice ${invoice.invoiceNumber} to confirm.`, "booking");
+  notifyAllAdmins(`NEW BOOKING: ${currentUser.name} booked ${type} for ${date} at ${time}. Auto-assigned to ${doctor.name}.`);
+  saveDB(); closeModal();
+  alert(`Appointment booked for ${date} at ${time}.\nYour clinical provider: ${doctor.name}.\nPlease pay within 2 hours to confirm, or the slot is released.`);
+  navigate("invoices");
+};
+
+window.rescheduleAppointment = function(e,id){
+  e.preventDefault();
+  const a = db.appointments.find(x=>x.id===id); if(!a) return;
+  const d = $("resDate").value, t = $("resTime").value;
+  if(!validateHospitalBookingWindow(d,t,"rescheduled appointment")) return;
+  if(new Date(`${d}T${t}`) <= new Date(`${a.date}T${a.time}`)){ alert("Please choose a later date/time than the current appointment."); return; }
+  syncBookings();
+  if(patientIsBusy(a.patientId,d,t,a.id)){ alert("You already have another appointment during this time."); return; }
+  const free = db.users.filter(u=>u.role==="doctor" && u.enabled && !isDoctorOff(u.id,d) && !doctorProviderBusy(u.id,d,t,a.id) &&
+    db.appointments.filter(x=>x.id!==a.id && x.doctorId===u.id && x.date===d && x.status!=="Cancelled").length < getDoctorMaxBookings(u.id,d));
+  if(!free.length){ alert("No clinical provider is free at that time. Please choose another time."); return; }
+  const keep = free.find(u=>u.id===a.doctorId);               /* keep the same doctor if they are free, else random */
+  const doc = keep || pickRandom(free);
+  const oldDoc = a.doctorId, oldStamp = `${a.date} at ${a.time}`;
+  a.doctorId = doc.id; a.specialty = doc.specialty||a.specialty;
+  a.date = d; a.time = t; a.endTime = addMinutesToTime(t,APPT_MINUTES); a.rescheduledAt = new Date().toISOString();
+  a.rem24P = a.rem24D = a.rem1P = a.rem1D = null;           /* reminders restart for the new time */
+  a.status = a.status==="Confirmed" ? "Confirmed" : "Pending Payment";
+  if(oldDoc!==doc.id) notify(oldDoc, `Appointment on ${oldStamp} was rescheduled and reassigned to another provider.`, "booking");
+  notify(doc.id, `APPOINTMENT ${oldDoc!==doc.id?"ASSIGNED TO YOU (RESCHEDULED)":"RESCHEDULED"}: ${getUser(a.patientId)?.name||"Patient"} – now ${d} at ${t}.`, "booking");
+  notify(a.patientId, `Your appointment is now ${d} at ${t} with ${doc.name}.`, "booking");
+  notifyAllAdmins(`APPOINTMENT RESCHEDULED: ${getUser(a.patientId)?.name||"Patient"} is now ${d} at ${t} with ${doc.name}.`);
+  saveDB(); closeModal(); alert(`Appointment rescheduled to ${d} at ${t} with ${doc.name}.`); navigate("appointments");
+};
+
+/* ---------- Nursing officers (home services & assessments) ---------- */
+window.isHomeProviderBusy = function(providerId,date,time,excludeId){
+  if(!providerId || !date || !time) return false;
+  const s = timeToMinutes(time), e = s+HOME_VISIT_MINUTES;
+  return db.homeServices.some(h=>{
+    if(h.id===excludeId || h.providerId!==providerId || h.date!==date) return false;
+    if(["Cancelled","Completed","Not Suitable"].includes(h.status)) return false;
+    const hs = timeToMinutes(h.time);
+    return overlap(s,e,hs,hs+HOME_VISIT_MINUTES);
+  });
+};
+function freeNurses(date,time){
+  return db.users.filter(u=>u.role==="nurse" && u.enabled && u.homeServiceProvider && !isHomeProviderBusy(u.id,date,time));
+}
+function assignNurse(date,time){ syncBookings(); const f = freeNurses(date,time); return f.length ? pickRandom(f) : null; }
+
+/* Replace the "choose a nursing officer" dropdown by an automatic-assignment notice. */
+function autoNurseUI(selectId,dateId,timeId){
+  const sel = $(selectId); if(!sel) return;
+  sel.required = false;
+  const group = sel.closest(".form-group"); if(group) group.style.display = "none";
+  const info = document.createElement("div");
+  info.className = "alert alert-info"; info.id = selectId+"_auto";
+  info.innerHTML = `🩺 A nursing officer is assigned to you automatically. <span id="${selectId}_availText"></span>`;
+  (group||sel).after(info);
+  const upd = ()=>{
+    const d = $(dateId)?.value, t = $(timeId)?.value, span = $(selectId+"_availText"); if(!span) return;
+    if(!d || !t){ span.textContent = ""; return; }
+    syncBookings();
+    const n = freeNurses(d,t).length;
+    span.innerHTML = n ? `<strong style="color:#166534">✅ A nursing officer is available at that time.</strong>`
+                       : `<strong style="color:#92400E">No nursing officer is free then (visits take about ${HOME_VISIT_MINUTES} minutes). Please choose another time.</strong>`;
+  };
+  [$(dateId),$(timeId)].forEach(el=>{ if(el){ el.addEventListener("change",upd); el.addEventListener("input",upd); } });
+  upd();
+}
+function setAutoNurse(selectId,nurse){
+  const sel = $(selectId); if(!sel) return;
+  sel.innerHTML = `<option value="${nurse.id}" selected>${esc(nurse.name)}</option>`;
+  sel.value = nurse.id;
+}
+
+const prevShowHomeServiceForm = window.showHomeServiceForm;
+window.showHomeServiceForm = function(){ prevShowHomeServiceForm.apply(this, arguments); autoNurseUI("homeProvider","homeDate","homeTime"); };
+const prevShowHomeAssessmentForm = window.showHomeAssessmentForm;
+window.showHomeAssessmentForm = function(){ prevShowHomeAssessmentForm.apply(this, arguments); autoNurseUI("assessmentProvider","assessmentDate","assessmentTime"); };
+
+const prevCreateHomeService = window.createHomeService;
+window.createHomeService = function(e){
+  const date = $("homeDate")?.value, time = $("homeTime")?.value;
+  if(date && time){
+    if(!validateHospitalBookingWindow(date,time,"home service")){ e.preventDefault(); return; }
+    const nurse = assignNurse(date,time);
+    if(!nurse){ e.preventDefault(); alert("No nursing officer is free at that time. Please choose another time."); return; }
+    setAutoNurse("homeProvider",nurse);
+  }
+  const before = db.homeServices.length;
+  prevCreateHomeService(e);
+  if(db.homeServices.length>before){
+    const h = db.homeServices[db.homeServices.length-1];
+    const p = getUser(h.patientId);
+    notify(h.providerId, `NEW HOME SERVICE ASSIGNED TO YOU: ${h.service} for ${p?.name||"patient"} on ${h.date} at ${h.time}. Location: ${h.address||p?.address||"-"}. Awaiting payment.`, "home");
+    notify(h.patientId, `Your home service is booked for ${h.date} at ${h.time}. Nursing officer: ${getUser(h.providerId)?.name||"-"}.`, "home");
+  }
+};
+
+const prevCreateHomeAssessment = window.createHomeAssessment;
+window.createHomeAssessment = function(e){
+  const date = $("assessmentDate")?.value, time = $("assessmentTime")?.value;
+  if(date && time){
+    if(!validateHospitalBookingWindow(date,time,"home assessment")){ e.preventDefault(); return; }
+    const nurse = assignNurse(date,time);
+    if(!nurse){ e.preventDefault(); alert("No nursing officer is free at that time. Please choose another time."); return; }
+    setAutoNurse("assessmentProvider",nurse);
+  }
+  prevCreateHomeAssessment(e);     /* the original already notifies the assigned nurse */
+};
+
+/* =========================================================
+   CLINICAL NOTES + PATIENT HISTORY
+========================================================= */
+function consultByAppt(apptId){ return db.consultations.find(c=>c.appointmentId===apptId); }
+function getOrCreateConsult(a){
+  let c = consultByAppt(a.id);
+  if(!c){
+    c = {id:uid("consultation"), appointmentId:a.id, patientId:a.patientId, doctorId:a.doctorId, type:a.type, date:a.date, createdAt:new Date().toISOString(), durationMinutes:0, clinicalNotes:"", diagnosis:"", notesHistory:[], transcript:[]};
+    db.consultations.push(c);
+  }
+  return c;
+}
+function stamp(c){ return c.endedAt || c.updatedAt || c.createdAt || ""; }
+function patientHistory(patientId, excludeApptId){
+  return db.consultations
+    .filter(c=>c.patientId===patientId && c.appointmentId!==excludeApptId &&
+      ((c.clinicalNotes||"").trim() || (c.diagnosis||"").trim() || (c.transcript&&c.transcript.length)))
+    .sort((a,b)=>String(stamp(b)).localeCompare(String(stamp(a))));
+}
+function historyHTML(items){
+  if(!items.length) return `<div class="empty">No previous clinical notes for this patient.</div>`;
+  return items.map(c=>{
+    const a = db.appointments.find(x=>x.id===c.appointmentId), d = getUser(c.doctorId);
+    const lines = c.transcript||[];
+    return `<div class="v8-hist">
+      <div class="flex space-between"><strong>${esc(a?.date || (c.createdAt||"").slice(0,10))}${a?.time?" · "+esc(a.time):""}</strong>
+        <span class="badge badge-dark">${esc(c.type||a?.type||"Consultation")}</span></div>
+      <div class="small text-muted">Seen by ${esc(d?.name||"-")}${c.endedAt?` · ended ${esc(fmtDT(c.endedAt))}`:" · notes saved, visit not ended"}</div>
+      ${c.diagnosis?`<div style="margin-top:6px"><strong>Diagnosis / impression:</strong> ${esc(c.diagnosis)}</div>`:""}
+      <div style="white-space:pre-wrap;margin-top:6px">${esc(c.clinicalNotes||"(no written notes)")}</div>
+      ${lines.length?`<details style="margin-top:8px"><summary class="small"><strong>Consultation transcript (${lines.length} lines)</strong></summary>
+        <div class="v8-hist-tr">${lines.map(l=>`<div><span class="small text-muted">${esc(fmtClock(l.at))} · ${esc(l.speakerName)}:</span> ${esc(l.text)}${l.translated?`<div class="small" style="color:#0A5DB0">↳ ${esc(l.translated)}</div>`:""}</div>`).join("")}</div></details>`:""}
+    </div>`;
+  }).join("");
+}
+function labHistoryHTML(patientId){
+  const done = db.labRequests.filter(r=>r.patientId===patientId && r.status==="Completed").sort((a,b)=>String(b.resultDate).localeCompare(String(a.resultDate))).slice(0,5);
+  if(!done.length) return "";
+  return `<h4 style="margin-top:14px">Recent laboratory results</h4>` + done.map(r=>`<div class="v8-hist"><strong>${esc(r.testName)}</strong> <span class="small text-muted">${esc(fmtDT(r.resultDate))}</span><div style="white-space:pre-wrap">${esc(r.result||"")}</div></div>`).join("");
+}
+
+/* ---------- Patient Records (doctor) ---------- */
+window.v8OpenRecord = function(patientId){
+  const p = getUser(patientId); if(!p) return;
+  const hist = patientHistory(patientId,"");
+  $("modalContent").innerHTML = `
+    <h2>📋 ${esc(p.name)} — Patient Record</h2>
+    <p class="text-muted">${esc(p.phone||"")} ${p.address?" · "+esc(p.address):""} · ${esc(getPatientStatus(patientId))}</p>
+    <h4>Clinical notes history (${hist.length})</h4>
+    ${historyHTML(hist)}
+    ${labHistoryHTML(patientId)}
+    <button class="btn btn-secondary" onclick="closeModal()">Close</button>`;
+  openModal();
+};
+window.v8RecordSearch = function(v){
+  v = (v||"").toLowerCase();
+  document.querySelectorAll("#recBody tr[data-q]").forEach(tr=>{ tr.style.display = (tr.dataset.q||"").includes(v) ? "" : "none"; });
+};
+function renderPatientRecords(){
+  const myIds = new Set([...db.appointments.filter(a=>a.doctorId===currentUser.id).map(a=>a.patientId), ...db.consultations.filter(c=>c.doctorId===currentUser.id).map(c=>c.patientId)]);
+  const patients = db.users.filter(u=>u.role==="patient" && (V8.recAll || myIds.has(u.id)));
+  const rows = patients.map(p=>{
+    const hist = patientHistory(p.id,"");
+    const last = hist[0];
+    return `<tr data-q="${esc((p.name+" "+(p.phone||"")).toLowerCase())}"><td><strong>${esc(p.name)}</strong><div class="small text-muted">${esc(p.phone||"")}</div></td>
+      <td>${hist.length}</td><td>${last?esc(fmtDT(stamp(last))):"—"}</td><td>${patientStatusBadge(p.id)}</td>
+      <td><button class="btn btn-primary" onclick="v8OpenRecord('${p.id}')">Open record</button></td></tr>`;
+  }).join("");
+  $("content").innerHTML = `
+    <h1 class="page-title">Patient Records</h1>
+    <div class="alert alert-info">Clinical notes you write are saved to the patient's record. Next time you see the patient you can review the full history here or inside the consultation room.</div>
+    <div class="card">
+      <div class="flex" style="margin-bottom:10px">
+        <input class="form-control" style="max-width:300px" placeholder="Search patient…" oninput="v8RecordSearch(this.value)">
+        <label style="margin:0;font-weight:normal"><input type="checkbox" ${V8.recAll?"checked":""} onchange="V8.recAll=this.checked;navigate('patient-records')"> Show all patients</label>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>Patient</th><th>Saved visits</th><th>Last visit</th><th>Status</th><th></th></tr></thead>
+      <tbody id="recBody">${rows || `<tr><td colspan="5"><div class="empty">No patients yet. Tick “Show all patients” to browse everyone.</div></td></tr>`}</tbody></table></div>
+    </div>`;
+}
+
+/* =========================================================
+   TRANSLATION  (original → viewer's language)
+========================================================= */
+const LANGS = [
+  {code:"en", label:"English",   rec:"en-KE"},
+  {code:"sw", label:"Kiswahili", rec:"sw-KE"},
+  {code:"fr", label:"French",    rec:"fr-FR"},
+  {code:"ar", label:"Arabic",    rec:"ar-SA"},
+  {code:"hi", label:"Hindi",     rec:"hi-IN"}
+];
+const langLabel = c=>(LANGS.find(l=>l.code===c)||{label:c}).label;
+
+/* Offline fallback: common clinic phrases English <-> Kiswahili (approximate). */
+const PHRASEBOOK = [
+  ["hello","habari"],["good morning","habari za asubuhi"],["thank you","asante"],["goodbye","kwaheri"],["yes","ndiyo"],["no","hapana"],
+  ["how are you feeling today","unajisikiaje leo"],["where does it hurt","unaumwa wapi"],
+  ["how long have you had the pain","umekuwa na maumivu haya kwa muda gani"],["do you have a fever","una homa"],["do you have a cough","una kikohozi"],
+  ["are you taking any medicine","unatumia dawa yoyote"],["have you taken your medicine","umetumia dawa yako"],["do you have any allergies","una mzio wowote"],
+  ["take this medicine twice a day","tumia dawa hii mara mbili kwa siku"],["take it after food","ichukue baada ya kula"],["drink plenty of water","kunywa maji mengi"],
+  ["you need to rest","unahitaji kupumzika"],["i will request a laboratory test","nitaomba kipimo cha maabara"],["come back for a review in one week","rudi kwa uchunguzi baada ya wiki moja"],
+  ["do you understand","unaelewa"],["please repeat","tafadhali rudia"],["can you hear me","unanisikia"],["i can hear you","nakusikia"],
+  ["what is your name","jina lako ni nani"],["how old are you","una umri gani"],["are you pregnant","una mimba"],
+  ["i have a headache","ninaumwa na kichwa"],["i have chest pain","ninaumwa na kifua"],["i have a stomach ache","ninaumwa na tumbo"],
+  ["i feel dizzy","ninasikia kizunguzungu"],["i cannot sleep","siwezi kulala"],["i have been vomiting","nimekuwa nikitapika"],
+  ["i have diarrhoea","ninaharisha"],["i have difficulty breathing","nina shida ya kupumua"],["my blood pressure is high","shinikizo langu la damu ni juu"],
+  ["since yesterday","tangu jana"],["for three days","kwa siku tatu"]
+];
+function norm(s){ return String(s||"").toLowerCase().replace(/[^\p{L}\p{N}\s']/gu," ").replace(/\s+/g," ").trim(); }
+function phrasebook(text,from,to){
+  if(!((from==="en"&&to==="sw")||(from==="sw"&&to==="en"))) return null;
+  const i = from==="en"?0:1, o = from==="en"?1:0, t = norm(text); if(!t) return null;
+  let best = null, exact = false;
+  for(const p of PHRASEBOOK){
+    const k = norm(p[i]);
+    if(t===k){ best = p; exact = true; break; }
+    if(t.includes(k) && k.length>=t.length*0.6 && (!best || k.length>norm(best[i]).length)) best = p;
+  }
+  return best ? {text:best[o].charAt(0).toUpperCase()+best[o].slice(1), exact} : null;
+}
+/* Order: hospital translation service (if configured) → exact phrasebook match → on-device browser
+   translator (with a timeout so it can never freeze captions) → approximate phrasebook match.
+   Patient speech is not sent to any public third-party service by default. */
+function getDeviceTranslator(from,to){
+  const key = from+">"+to;
+  if(!V8.translators[key]){
+    V8.translators[key] = (async()=>{
+      try{
+        if(!("Translator" in self)) return null;
+        const av = await self.Translator.availability({sourceLanguage:from,targetLanguage:to});
+        if(av==="unavailable") return null;
+        return await self.Translator.create({sourceLanguage:from,targetLanguage:to});
+      }catch(e){ return null; }
+    })();
+  }
+  return V8.translators[key];
+}
+async function translateText(text,from,to){
+  if(!text || from===to) return {text:null, method:"same"};
+  if(window.V8_TRANSLATE_URL){
+    try{
+      const r = await fetch(window.V8_TRANSLATE_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({q:text,source:from,target:to,format:"text"})});
+      const j = await r.json(); if(j && j.translatedText) return {text:j.translatedText, method:"hospital translation service"};
+    }catch(e){}
+  }
+  const pb = phrasebook(text,from,to);
+  if(pb && pb.exact) return {text:pb.text, method:"phrasebook"};
+  try{
+    const tr = await Promise.race([getDeviceTranslator(from,to), new Promise(r=>setTimeout(()=>r(null),3500))]);
+    if(tr){ const out = await Promise.race([tr.translate(text), new Promise(r=>setTimeout(()=>r(null),5000))]); if(out) return {text:out, method:"on-device translation"}; }
+  }catch(e){}
+  if(pb) return {text:pb.text, method:"phrasebook (approximate)"};
+  return {text:null, method:"unavailable"};
+}
+
+/* =========================================================
+   CONSULTATION PAGE + ROOM
+========================================================= */
+window.renderConsultation = function(){
+  const mine = db.appointments.filter(a=>(a.patientId===currentUser.id||a.doctorId===currentUser.id) && a.status==="Confirmed");
+  const isDoc = currentUser.role==="doctor";
+  $("content").innerHTML = `
+    <h1 class="page-title">Consultation</h1>
+    <div class="alert alert-info">Maximum consultation duration: <strong>45 minutes</strong>. Live captions, transcription and translation are available during every consultation. Patients cannot join unpaid consultations.</div>
+    ${mine.length ? mine.map(a=>{
+      const p = getUser(a.patientId), d = getUser(a.doctorId);
+      const prev = isDoc ? patientHistory(a.patientId,a.id).length : 0;
+      return `<div class="card"><div class="flex space-between">
+        <div><h3>${esc(isDoc ? p?.name : d?.name)}</h3>
+          <p class="text-muted">${esc(a.date)} ${esc(a.time)} – ${esc(a.endTime)}<br>${esc(a.specialty||d?.specialty||"Clinical Provider")}<br>${esc(a.type)}</p>
+          ${isDoc ? `<span class="badge ${prev?"badge-info":"badge-dark"}">${prev} previous visit${prev===1?"":"s"} with notes</span>` : ""}</div>
+        <div>${isDoc?`<button class="btn btn-secondary" onclick="v8OpenRecord('${a.patientId}')">📋 History</button>`:""}<button class="btn btn-primary" onclick="joinConsultation('${a.id}')">🎥 Join</button></div>
+      </div></div>`;
+    }).join("") : `<div class="card"><div class="empty">No confirmed consultations.</div></div>`}`;
+};
+
+function stopSession(){
+  const S = V8.session; if(!S) return;
+  V8.session = null;
+  try{ if(S.isDoctor){ flushNotes(S); flushTranscript(S); } }catch(e){}
+  S.captionsOn = false;
+  try{ S.rec && (S.rec.onend=null, S.rec.stop()); }catch(e){}
+  [S.camStream,S.micStream].forEach(s=>{ try{ s && s.getTracks().forEach(t=>t.stop()); }catch(e){} });
+  clearInterval(S.timer); clearInterval(S.presence); clearTimeout(S.noteTimer); clearTimeout(S.trTimer);
+  if(consultIntervals && consultIntervals[S.apptId]){ clearInterval(consultIntervals[S.apptId]); delete consultIntervals[S.apptId]; }
+}
+
+function busSend(S,type,payload){
+  try{ localStorage.setItem("beaconConsultBus", JSON.stringify({appt:S.apptId, from:currentUser.id, type, payload, n:Math.random()})); }catch(e){}
+}
+window.addEventListener("storage", function(ev){
+  const S = V8.session;
+  if(ev.key!=="beaconConsultBus" || !ev.newValue || !S || !currentUser) return;
+  let m; try{ m = JSON.parse(ev.newValue); }catch(e){ return; }
+  if(m.appt!==S.apptId || m.from===currentUser.id) return;
+  if(m.type==="caption"){ if(!S.lines.some(l=>l.id===m.payload.id)) addLine(S,m.payload,false); }
+  else if(m.type==="presence"){ S.otherSeen = Date.now(); updatePresence(S); if(!m.payload.reply) busSend(S,"presence",{reply:true}); }
+  else if(m.type==="end"){
+    const b = $("v8Status"); if(b) b.innerHTML = `<div class="alert alert-success">The doctor has ended the consultation. This window will close shortly.</div>`;
+    setTimeout(()=>{ if(V8.session===S) closeModal(); }, 2500);
+  }
+});
+function updatePresence(S){
+  const el = $("v8Presence"); if(!el) return;
+  const on = Date.now()-(S.otherSeen||0) < 9000;
+  el.innerHTML = on ? `<span class="v8-dot on"></span> ${esc(S.otherName)} is in the consultation` : `<span class="v8-dot"></span> Waiting for ${esc(S.otherName)} to join…`;
+}
+
+window.joinConsultation = function(appointmentId){
+  const a = db.appointments.find(x=>x.id===appointmentId);
+  if(!a || a.status!=="Confirmed"){ alert("This consultation has not been confirmed."); return; }
+  if(a.patientId!==currentUser.id && a.doctorId!==currentUser.id){ alert("You are not a participant in this consultation."); return; }
+  stopSession();
+  const isDoctor = currentUser.role==="doctor";
+  const other = getUser(isDoctor ? a.patientId : a.doctorId);
+  const c = isDoctor ? getOrCreateConsult(a) : consultByAppt(a.id);
+  if(isDoctor) saveDB();
+  const S = V8.session = {apptId:a.id, a, isDoctor, otherName:other?.name||"the other participant", otherSeen:0, lines:[], speakLang:"en", viewLang:"orig",
+    captionsOn:false, startedAt:Date.now(), translators:{}, lastSaved:0};
+  /* A returning transcript (e.g. doctor re-joins) is restored. */
+  if(c && c.transcript && c.transcript.length) S.lines = c.transcript.map(l=>({...l}));
+  const hist = isDoctor ? patientHistory(a.patientId,a.id) : [];
+  const physical = a.type==="Physical Hospital Visit";
+  const langOpts = (sel)=>LANGS.map(l=>`<option value="${l.code}" ${l.code===sel?"selected":""}>${l.label}</option>`).join("");
+
+  $("modalContent").innerHTML = `
+  <div class="flex space-between"><h2 style="margin:0">${physical?"In-person Visit":"Telemedicine Consultation"}</h2><div id="v8Presence" class="small"></div></div>
+  <div class="small text-muted" style="margin:4px 0 12px">${esc(a.date)} ${esc(a.time)}–${esc(a.endTime)} · ${esc(a.type)} · ${isDoctor?"Patient":"Doctor"}: <strong>${esc(other?.name||"-")}</strong></div>
+  <div id="v8Status"></div>
+  <div class="v8-room">
+    <div>
+      <div class="v8-video" id="v8Video">
+        <div class="v8-remote"><div class="v8-avatar">${esc((other?.name||"?").charAt(0).toUpperCase())}</div><div>${esc(other?.name||"")}</div>
+          <div class="small" style="opacity:.8">${physical?"In-person consultation":"Video / audio connects through the hospital's signalling service in production"}</div></div>
+        <video id="v8LocalVideo" class="v8-local hidden" autoplay muted playsinline></video>
+        <div id="v8CapOverlay" class="v8-overlay hidden"></div>
+      </div>
+      <div class="flex" style="margin-top:8px">
+        ${physical?"":`<button id="v8CamBtn" class="btn btn-primary" onclick="v8ToggleCam()">📹 Camera: off</button>
+        <button id="v8MicBtn" class="btn btn-secondary" onclick="v8ToggleMic()">🎤 Mic: off</button>`}
+        <button id="v8CapBtn" class="btn btn-dark" onclick="v8ToggleCaptions()">🔤 Captions: off</button>
+      </div>
+      <div class="card v8-cap-card">
+        <div class="grid grid-2" style="gap:10px">
+          <div class="form-group" style="margin:0"><label class="small">I speak</label><select id="v8Speak" class="form-control" onchange="v8SetSpeak(this.value)">${langOpts("en")}</select></div>
+          <div class="form-group" style="margin:0"><label class="small">Show captions in</label><select id="v8View" class="form-control" onchange="v8SetView(this.value)"><option value="orig">Original (no translation)</option>${langOpts("")}</select></div>
+        </div>
+        <div id="v8CapNote" class="small text-muted" style="margin-top:6px"></div>
+        <div id="v8Transcript" class="v8-transcript"></div>
+        <div id="v8Interim" class="v8-interim small"></div>
+        <div class="flex" style="margin-top:8px;flex-wrap:nowrap">
+          <input id="v8Typed" class="form-control" placeholder="Type a message (also captioned & translated)…" onkeydown="if(event.key==='Enter'){event.preventDefault();v8SendTyped();}">
+          <button class="btn btn-primary" onclick="v8SendTyped()">Send</button>
+        </div>
+        <div class="flex" style="margin-top:6px"><button class="btn btn-secondary" onclick="v8DownloadTranscript()">⬇ Download transcript</button>
+          <span class="small text-muted">${isDoctor?"The transcript is saved to the patient's record.":"Captions are shared with your doctor; the transcript is kept in your medical record."}</span></div>
+      </div>
+    </div>
+    <div>
+      <div class="card" style="text-align:center"><div class="small text-muted">Time remaining</div><div id="consultTimer" style="font-size:34px;font-weight:bold;color:#0A5DB0">45:00</div></div>
+      ${isDoctor ? `
+      <div class="v8-tabs"><button id="v8TabNotes" class="v8-tab active" onclick="v8Tab('notes')">📝 Clinical Notes</button><button id="v8TabHist" class="v8-tab" onclick="v8Tab('hist')">🗂 Patient History (${hist.length})</button></div>
+      <div id="v8PanelNotes" class="card">
+        <div class="form-group"><label>Diagnosis / impression</label><input id="clinicalDx" class="form-control" value="${esc(c?.diagnosis||"")}" placeholder="e.g. Uncomplicated malaria" oninput="v8NotesChanged()"></div>
+        <div class="form-group"><label>Clinical notes</label><textarea id="clinicalNotes" class="form-control" rows="9" placeholder="History, examination, assessment, plan…" oninput="v8NotesChanged()">${esc(c?.clinicalNotes||"")}</textarea></div>
+        <div id="v8Saved" class="small text-muted" style="margin-bottom:8px">${c?.updatedAt?`Last saved ${esc(fmtClock(c.updatedAt))}`:"Notes auto-save as you type."}</div>
+        <button class="btn btn-secondary" onclick="saveClinicalNotes('${a.id}')">💾 Save Clinical Notes</button>
+        <button class="btn btn-success" onclick="endConsultation('${a.id}')">End Consultation & Prescribe</button>
+      </div>
+      <div id="v8PanelHist" class="card hidden" style="max-height:480px;overflow:auto">
+        <h4 style="margin-top:0">${esc(other?.name||"Patient")} — previous visits</h4>
+        ${historyHTML(hist)}${labHistoryHTML(a.patientId)}
+      </div>` : `
+      <div class="card"><h3>Your consultation</h3><p class="text-muted">Speak naturally. Your words appear as captions for your doctor and theirs for you, in the language you choose. You can also type a message.</p>
+        <button class="btn btn-secondary" onclick="closeModal()">Leave consultation</button></div>`}
+    </div>
+  </div>`;
+  V8.wideNext = true; openModal();
+  S.timerRemaining = 45*60;
+
+  /* countdown – the doctor's session ends the consultation automatically */
+  S.timer = setInterval(()=>{
+    const el = $("consultTimer"); if(!el){ stopSession(); return; }
+    S.timerRemaining--;
+    el.textContent = `${String(Math.floor(S.timerRemaining/60)).padStart(2,"0")}:${String(S.timerRemaining%60).padStart(2,"0")}`;
+    if(S.timerRemaining<=0){ clearInterval(S.timer); if(isDoctor) endConsultation(a.id,true); }
+  },1000);
+  consultIntervals[a.id] = S.timer;
+
+  /* presence heartbeat between the two participants */
+  busSend(S,"presence",{}); updatePresence(S);
+  S.presence = setInterval(()=>{ if(!$("v8Transcript")){ stopSession(); return; } busSend(S,"presence",{}); updatePresence(S); },3000);
+
+  S.lines.forEach(l=>renderLine(S,l));
+  capNote(S);
+  /* start live captions straight away where the browser supports speech recognition */
+  if(window.SpeechRecognition||window.webkitSpeechRecognition) v8ToggleCaptions(true);
+};
+
+function capNote(S,extra){
+  const el = $("v8CapNote"); if(!el) return;
+  const SR = window.SpeechRecognition||window.webkitSpeechRecognition;
+  el.innerHTML = (SR ? "Live speech captions use your microphone (Chrome/Edge)." : "Live speech captions are not supported in this browser (use Chrome or Edge) — you can still type messages.") +
+    (extra?` <strong>${extra}</strong>`:"");
+}
+
+window.v8Tab = function(name){
+  $("v8PanelNotes")?.classList.toggle("hidden", name!=="notes");
+  $("v8PanelHist")?.classList.toggle("hidden", name!=="hist");
+  $("v8TabNotes")?.classList.toggle("active", name==="notes");
+  $("v8TabHist")?.classList.toggle("active", name==="hist");
+};
+
+/* ---------- camera & microphone ---------- */
+window.v8ToggleCam = async function(){
+  const S = V8.session; if(!S) return;
+  const btn = $("v8CamBtn"), vid = $("v8LocalVideo");
+  if(S.camStream){
+    S.camStream.getTracks().forEach(t=>t.stop()); S.camStream = null;
+    vid.srcObject = null; vid.classList.add("hidden"); btn.textContent = "📹 Camera: off"; return;
+  }
+  try{
+    S.camStream = await navigator.mediaDevices.getUserMedia({video:true, audio:false});
+    vid.srcObject = S.camStream; vid.classList.remove("hidden"); btn.textContent = "📹 Camera: on";
+  }catch(e){ capNote(S,"Camera permission was not granted."); }
+};
+window.v8ToggleMic = async function(){
+  const S = V8.session; if(!S) return;
+  const btn = $("v8MicBtn");
+  if(S.micStream){ S.micStream.getTracks().forEach(t=>t.stop()); S.micStream = null; btn.textContent = "🎤 Mic: off"; return; }
+  try{ S.micStream = await navigator.mediaDevices.getUserMedia({audio:true}); btn.textContent = "🎤 Mic: on"; }
+  catch(e){ capNote(S,"Microphone permission was not granted."); }
+};
+window.startCamera = ()=>window.v8ToggleCam();
+window.startMicrophone = ()=>window.v8ToggleMic();
+
+/* ---------- captions: speech → text ---------- */
+window.v8SetSpeak = function(code){
+  const S = V8.session; if(!S) return; S.speakLang = code;
+  if(S.captionsOn){ stopRecognition(S); startRecognition(S); }
+};
+window.v8SetView = function(code){
+  const S = V8.session; if(!S) return; S.viewLang = code;
+  S.lines.forEach(l=>{ l.translated = null; l.tLang = null; });
+  const box = $("v8Transcript"); if(box) box.innerHTML = "";
+  S.lines.forEach(l=>renderLine(S,l));
+};
+window.v8ToggleCaptions = function(force){
+  const S = V8.session; if(!S) return;
+  const on = typeof force==="boolean" ? force : !S.captionsOn;
+  const btn = $("v8CapBtn");
+  if(on){
+    const SR = window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR){ capNote(S); return; }
+    S.captionsOn = true; startRecognition(S);
+    if(btn){ btn.textContent = "🔤 Captions: on"; btn.className = "btn btn-success"; }
+  }else{
+    S.captionsOn = false; stopRecognition(S);
+    if(btn){ btn.textContent = "🔤 Captions: off"; btn.className = "btn btn-dark"; }
+    const i = $("v8Interim"); if(i) i.textContent = "";
+  }
+};
+function startRecognition(S){
+  const SR = window.SpeechRecognition||window.webkitSpeechRecognition; if(!SR) return;
+  try{
+    const rec = new SR();
+    rec.continuous = true; rec.interimResults = true;
+    rec.lang = (LANGS.find(l=>l.code===S.speakLang)||LANGS[0]).rec;
+    rec.onresult = ev=>{
+      let interim = "";
+      for(let i=ev.resultIndex;i<ev.results.length;i++){
+        const r = ev.results[i], text = (r[0].transcript||"").trim();
+        if(!text) continue;
+        if(r.isFinal) commitLine(S,text); else interim += text+" ";
+      }
+      const el = $("v8Interim"); if(el) el.textContent = interim ? "… "+interim : "";
+    };
+    rec.onerror = ev=>{
+      if(ev.error==="not-allowed"||ev.error==="service-not-allowed"){ S.captionsOn=false; v8ToggleCaptions(false); capNote(S,"Microphone permission denied — captions are off. You can still type."); }
+      else if(ev.error==="network"){ capNote(S,"The browser's speech service could not be reached (it needs internet). You can still type."); }
+    };
+    rec.onend = ()=>{ if(V8.session===S && S.captionsOn){ setTimeout(()=>{ try{ rec.start(); }catch(e){} },300); } };
+    S.rec = rec; rec.start();
+  }catch(e){ capNote(S,"Could not start speech recognition."); }
+}
+function stopRecognition(S){ try{ if(S.rec){ S.rec.onend = null; S.rec.stop(); } }catch(e){} S.rec = null; }
+
+function commitLine(S,text){
+  const line = {id:uid("line"), at:new Date().toISOString(), speakerId:currentUser.id, speakerName:currentUser.name, role:currentUser.role, lang:S.speakLang, text};
+  addLine(S,line,true);
+}
+window.v8SendTyped = function(){
+  const S = V8.session, inp = $("v8Typed"); if(!S||!inp) return;
+  const t = inp.value.trim(); if(!t) return;
+  inp.value = ""; commitLine(S,t);
+};
+
+/* A line is shown locally, translated into this viewer's language, shared with the other
+   participant, and (on the doctor's side) saved to the patient's record. */
+function addLine(S,line,local){
+  S.lines.push(line);
+  renderLine(S,line);
+  if(local) busSend(S,"caption",line);
+  if(S.isDoctor) scheduleTranscriptSave(S);
+}
+function renderLine(S,line){
+  const box = $("v8Transcript"); if(!box) return;
+  let el = $("v8l_"+line.id);
+  if(!el){ el = document.createElement("div"); el.id = "v8l_"+line.id; el.className = "v8-line "+(line.speakerId===currentUser.id?"mine":"theirs"); box.appendChild(el); }
+  const showTr = S.viewLang!=="orig" && S.viewLang!==line.lang;
+  el.innerHTML = `<div class="v8-line-head"><strong>${esc(line.speakerName)}</strong> <span class="small text-muted">${esc(fmtClock(line.at))}</span> <span class="badge badge-dark">${esc(line.lang.toUpperCase())}</span></div>
+    <div>${esc(line.text)}</div>
+    ${showTr ? `<div class="v8-tr">${line.translated ? "↳ "+esc(line.translated)+` <span class="small text-muted">(${esc(line.tMethod||"")})</span>` : (line.tFailed ? `<span class="small text-muted">↳ translation unavailable for this phrase</span>` : `<span class="small text-muted">↳ translating…</span>`)}</div>` : ""}`;
+  box.scrollTop = box.scrollHeight;
+  showOverlay(S,line);
+  if(showTr && !line.translated && !line.tFailed && line.tLang!==S.viewLang){
+    line.tLang = S.viewLang;
+    translateText(line.text,line.lang,S.viewLang).then(res=>{
+      if(V8.session!==S) return;
+      if(res.text){ line.translated = res.text; line.tMethod = res.method; } else { line.tFailed = true; }
+      renderLine(S,line);
+      if(S.isDoctor) scheduleTranscriptSave(S);
+    });
+  }
+}
+function showOverlay(S,line){
+  const ov = $("v8CapOverlay"); if(!ov) return;
+  const showTr = S.viewLang!=="orig" && S.viewLang!==line.lang && line.translated;
+  ov.innerHTML = `<strong>${esc(line.speakerName)}:</strong> ${esc(showTr ? line.translated : line.text)}`;
+  ov.classList.remove("hidden");
+  clearTimeout(S.ovTimer); S.ovTimer = setTimeout(()=>ov.classList.add("hidden"), 9000);
+}
+
+window.v8DownloadTranscript = function(){
+  const S = V8.session; if(!S) return;
+  const a = S.a, p = getUser(a.patientId), d = getUser(a.doctorId);
+  const txt = [`Beacon of Hope Hospital — Consultation transcript`, `Patient: ${p?.name||"-"}  |  Doctor: ${d?.name||"-"}`, `Date: ${a.date} ${a.time}`, ``]
+    .concat(S.lines.map(l=>`[${fmtClock(l.at)}] ${l.speakerName} (${l.lang}): ${l.text}${l.translated?`\n      → ${l.translated}`:""}`)).join("\n");
+  const url = URL.createObjectURL(new Blob([txt],{type:"text/plain"}));
+  const link = document.createElement("a"); link.href = url; link.download = `transcript_${a.date}_${(p?.name||"patient").replace(/\s+/g,"_")}.txt`;
+  document.body.appendChild(link); link.click(); link.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000);
+};
+
+/* ---------- notes: autosave + manual save + history ---------- */
+function flushTranscript(S){
+  const c = consultByAppt(S.apptId); if(!c) return;
+  c.transcript = S.lines.map(l=>({...l})); saveDB();
+}
+function scheduleTranscriptSave(S){
+  clearTimeout(S.trTimer);
+  S.trTimer = setTimeout(()=>{ if(V8.session===S) flushTranscript(S); }, 1500);
+}
+function flushNotes(S,manual){
+  const c = consultByAppt(S.apptId); if(!c) return false;
+  const nEl = $("clinicalNotes"), dEl = $("clinicalDx"); if(!nEl) return false;
+  const notes = nEl.value, dx = dEl ? dEl.value : (c.diagnosis||"");
+  const changed = notes!==(c.clinicalNotes||"") || dx!==(c.diagnosis||"");
+  c.clinicalNotes = notes; c.diagnosis = dx; c.doctorId = S.a.doctorId;
+  if(changed || manual) c.updatedAt = new Date().toISOString();
+  if(manual){
+    c.notesHistory = c.notesHistory || [];
+    const last = c.notesHistory[c.notesHistory.length-1];
+    if(!last || last.text!==notes || last.diagnosis!==dx) c.notesHistory.push({at:c.updatedAt, by:currentUser.id, text:notes, diagnosis:dx});
+  }
+  if(changed || manual) saveDB();
+  return changed || !!manual;
+}
+window.v8NotesChanged = function(){
+  const S = V8.session; if(!S||!S.isDoctor) return;
+  const el = $("v8Saved"); if(el) el.textContent = "Typing…";
+  clearTimeout(S.noteTimer);
+  S.noteTimer = setTimeout(()=>{
+    if(V8.session!==S) return;
+    flushNotes(S,false);
+    const e = $("v8Saved"); if(e) e.textContent = "Auto-saved at "+fmtClock(new Date().toISOString());
+  },1200);
+};
+window.saveClinicalNotes = function(appointmentId){
+  const S = V8.session;
+  if(currentUser.role!=="doctor" || !S || S.apptId!==appointmentId) return;
+  flushNotes(S,true);
+  const e = $("v8Saved"); if(e) e.textContent = "Saved at "+fmtClock(new Date().toISOString())+" — added to the patient's record.";
+};
+
+window.endConsultation = function(appointmentId, autoEnd){
+  const a = db.appointments.find(x=>x.id===appointmentId); if(!a) return;
+  const S = V8.session;
+  if(currentUser.role!=="doctor"){ closeModal(); return; }
+  let minutes = 45;
+  if(S && S.apptId===appointmentId){
+    flushNotes(S,true); flushTranscript(S);
+    busSend(S,"end",{});
+    minutes = Math.min(45, Math.max(1, Math.ceil((Date.now()-S.startedAt)/60000)));
+  }
+  const c = getOrCreateConsult(a);
+  c.status = "Completed"; c.endedAt = new Date().toISOString(); c.durationMinutes = minutes; c.updatedAt = c.endedAt;
+  a.status = "Completed";
+  saveDB();
+  closeModal();
+  notify(a.patientId, "Your consultation has ended. A prescription may now be processed by the pharmacy.", "consult");
+  showPrescriptionForm(a.patientId, a.id);
+};
+
+/* =========================================================
+   V9: DAYS OFF · AUTO-RELEASE · REMINDERS · PRINTING
+========================================================= */
+const UNPAID_HOLD_MINUTES = 120;
+const HOSPITAL = {name:"Beacon of Hope Hospital", addr:"Ongata Rongai, Beacon of Hope Centre, Off Magadi Rd, Along Gataka Rd", phone:"0720876123", email:"hospital@beaconafrica.org"};
+
+/* ---------- Doctor days off ---------- */
+function isDoctorOff(doctorId, date){ return db.doctorDaysOff.some(d=>d.doctorId===doctorId && date>=d.from && date<=d.to); }
+
+function renderDaysOff(){
+  const mine = db.doctorDaysOff.filter(d=>d.doctorId===currentUser.id && d.to>=today()).sort((a,b)=>a.from.localeCompare(b.from));
+  $("content").innerHTML = `
+    <h1 class="page-title">Days Off</h1>
+    <div class="alert alert-info">Mark the days you are away. The system will not assign you any new appointments on those days. Appointments you already have on them are moved to another free doctor automatically (the patient and the new doctor are notified).</div>
+    <div class="card"><h3>Add days off</h3>
+      <form onsubmit="v8AddDaysOff(event)">
+        <div class="grid grid-2">
+          <div class="form-group"><label>From</label><input id="dofFrom" type="date" min="${today()}" class="form-control" required></div>
+          <div class="form-group"><label>To (same day for a single day)</label><input id="dofTo" type="date" min="${today()}" class="form-control" required></div>
+        </div>
+        <div class="form-group"><label>Reason (optional)</label><input id="dofReason" class="form-control" placeholder="e.g. Annual leave, conference"></div>
+        <button class="btn btn-primary">Mark as days off</button>
+      </form></div>
+    <div class="card"><h3>My upcoming days off</h3>
+      ${mine.length ? `<div class="table-wrap"><table><thead><tr><th>From</th><th>To</th><th>Reason</th><th></th></tr></thead><tbody>${
+        mine.map(d=>`<tr><td>${esc(d.from)}</td><td>${esc(d.to)}</td><td>${esc(d.reason||"-")}</td><td><button class="btn btn-danger" onclick="v8RemoveDaysOff('${d.id}')">Remove</button></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">No upcoming days off.</div>`}
+    </div>`;
+}
+window.v8AddDaysOff = function(e){
+  e.preventDefault();
+  const from = $("dofFrom").value, to = $("dofTo").value, reason = $("dofReason").value.trim();
+  if(!from || !to || to<from){ alert("Please choose a valid date range."); return; }
+  db.doctorDaysOff.push({id:uid("dayoff"), doctorId:currentUser.id, from, to, reason, createdAt:new Date().toISOString()});
+  /* move this doctor's existing appointments in the range to other free doctors */
+  syncBookings();
+  const affected = db.appointments.filter(a=>a.doctorId===currentUser.id && a.date>=from && a.date<=to && ["Pending Payment","Confirmed"].includes(a.status));
+  let moved = 0, stuck = 0;
+  affected.forEach(a=>{
+    const free = db.users.filter(u=>u.role==="doctor" && u.enabled && u.id!==currentUser.id && doctorIsFree(u,a.date,a.time));
+    const p = getUser(a.patientId);
+    if(free.length){
+      const nd = pickRandom(free);
+      a.doctorId = nd.id; a.specialty = nd.specialty||a.specialty; a.reassignedFrom = currentUser.id;
+      notify(nd.id, `APPOINTMENT ASSIGNED TO YOU: ${p?.name||"Patient"} – ${a.type} on ${a.date} at ${a.time} (${currentUser.name} is away).`, "booking");
+      notify(a.patientId, `Your appointment on ${a.date} at ${a.time} is now with ${nd.name} because ${currentUser.name} will be away.`, "booking");
+      moved++;
+    }else{
+      stuck++;
+      notifyAllAdmins(`ACTION NEEDED: ${currentUser.name} is off on ${a.date} but ${p?.name||"a patient"}'s appointment at ${a.time} has no free replacement doctor.`);
+      notify(a.patientId, `${currentUser.name} will be away on ${a.date}. The hospital will contact you to rebook your ${a.time} appointment.`, "booking");
+    }
+  });
+  saveDB();
+  alert(`Days off saved.` + (affected.length ? `\n${moved} appointment(s) moved to another doctor.` + (stuck ? `\n${stuck} could not be moved – the administrator has been alerted.` : "") : ""));
+  renderDaysOff();
+};
+window.v8RemoveDaysOff = function(id){
+  const i = db.doctorDaysOff.findIndex(d=>d.id===id && d.doctorId===currentUser.id);
+  if(i>=0){ db.doctorDaysOff.splice(i,1); saveDB(); }
+  renderDaysOff();
+};
+
+/* ---------- Auto-release of unpaid appointments ---------- */
+function releaseStaleBookings(){
+  const now = Date.now(); let changed = false;
+  db.appointments.forEach(a=>{
+    if(a.status!=="Pending Payment") return;
+    const created = new Date(a.createdAt||0).getTime(); if(!created) return;
+    const inv = db.invoices.find(i=>i.appointmentId===a.id && i.type==="Consultation");
+    if(inv && inv.status==="Paid") return;
+    const age = (now-created)/60000;
+    const p = getUser(a.patientId);
+    if(age>=UNPAID_HOLD_MINUTES){
+      a.status = "Cancelled"; a.cancelReason = "Not paid within 2 hours – slot released"; a.cancelledAt = new Date().toISOString();
+      if(inv && inv.status==="Pending"){ inv.status = "Cancelled"; inv.cancelledAt = a.cancelledAt; }
+      changed = true;
+      notify(a.patientId, `Your ${a.type} booking for ${a.date} at ${a.time} was cancelled because it was not paid within 2 hours. You can book again at any time.`, "payment");
+      notify(a.doctorId, `Unpaid booking released: ${p?.name||"Patient"} – ${a.date} at ${a.time}. The slot is free again.`, "booking");
+    }else if(age>=UNPAID_HOLD_MINUTES-30 && !a.expiryWarned){
+      a.expiryWarned = true; changed = true;
+      notify(a.patientId, `Please pay now: your ${a.type} booking for ${a.date} at ${a.time} will be released in about ${Math.max(1,Math.ceil(UNPAID_HOLD_MINUTES-age))} minutes if the invoice stays unpaid.`, "payment");
+    }
+  });
+  if(changed) saveDB();
+}
+
+/* ---------- Reminders (24 h and 1 h before) to patient and doctor ---------- */
+function runReminders(){
+  const now = Date.now();
+  db.appointments.forEach(a=>{
+    if(a.status!=="Confirmed") return;
+    const T = new Date(`${a.date}T${a.time}`).getTime(); if(isNaN(T)) return;
+    const mins = (T-now)/60000; if(mins<=0 || mins>24*60) return;
+    const confirmedAt = Math.max(new Date(a.paidAt||a.createdAt||0).getTime(), new Date(a.rescheduledAt||0).getTime());
+    const p = getUser(a.patientId), d = getUser(a.doctorId); if(!p || !d) return;
+    const key = mins<=60 ? "1" : "24";
+    if(confirmedAt > T-(key==="1"?60:24*60)*60000){        /* booked too late for this reminder */
+      if(key==="1"){ a.rem1P = true; a.rem1D = a.doctorId; } else { a.rem24P = true; a.rem24D = a.doctorId; }
+      return;
+    }
+    const when = key==="1" ? `in about ${Math.max(1,Math.round(mins))} minutes` : `in about ${Math.round(mins/60)} hours`;
+    const flagP = "rem"+key+"P", flagD = "rem"+key+"D";
+    if(!a[flagP]){ a[flagP] = true; saveDB(); notify(p.id, `⏰ REMINDER: your ${a.type} with ${d.name} starts ${when} (${a.date} at ${a.time}).`, "reminder"); }
+    if(a[flagD]!==a.doctorId){ a[flagD] = a.doctorId; saveDB(); notify(d.id, `⏰ REMINDER: ${a.type} with ${p.name} starts ${when} (${a.date} at ${a.time}).`, "reminder"); }
+  });
+}
+
+let tickTimer = null;
+function v8Tick(){
+  if(!currentUser) return;
+  try{ rawSyncBookings(); releaseStaleBookings(); runReminders(); }catch(e){ console.error(e); }
+  refreshBell();
+}
+function startTick(){ if(!tickTimer){ tickTimer = setInterval(v8Tick, 30000); } v8Tick(); }
+
+/* ---------- Action toast (e.g. "Print") ---------- */
+function pushActionToast(message, label, fn){
+  const h = toastHost(), el = document.createElement("div");
+  el.className = "v8-toast";
+  el.innerHTML = `<div class="v8-toast-title">✅ Done</div><div>${esc(message)}</div><div style="margin-top:8px"><button class="btn btn-primary" type="button">${esc(label)}</button></div>`;
+  el.querySelector("button").onclick = ()=>{ el.remove(); fn(); };
+  h.appendChild(el); setTimeout(()=>el.remove(), 15000);
+}
+
+/* ---------- Printing ---------- */
+function printDocument(title, body){
+  document.getElementById("v8PrintFrame")?.remove();
+  const f = document.createElement("iframe");
+  f.id = "v8PrintFrame"; f.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
+  document.body.appendChild(f);
+  const d = f.contentWindow.document;
+  d.open();
+  d.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>
+    @page{size:A4;margin:16mm}
+    body{font-family:Arial,Helvetica,sans-serif;color:#111;font-size:13px;line-height:1.45}
+    .lh{border-bottom:3px solid #0A5DB0;padding-bottom:8px;margin-bottom:14px}
+    .lh h1{margin:0;font-size:22px;color:#0A5DB0}.lh p{margin:2px 0;font-size:12px;color:#444}
+    h2{text-align:center;letter-spacing:1px;margin:10px 0 14px;font-size:17px}
+    table{width:100%;border-collapse:collapse;margin:8px 0}
+    th,td{border:1px solid #888;padding:6px 8px;text-align:left;vertical-align:top}
+    th{background:#EAF2FB}
+    .kv td{border:0;padding:3px 6px}.kv td:first-child{width:150px;font-weight:bold}
+    .box{border:1px solid #888;padding:10px;min-height:60px;white-space:pre-wrap;margin:6px 0}
+    .sig{margin-top:46px;display:flex;justify-content:space-between}
+    .sig div{width:44%;border-top:1px solid #000;padding-top:4px;font-size:12px}
+    .foot{margin-top:26px;font-size:11px;color:#555;border-top:1px solid #ccc;padding-top:6px}
+    .tag{display:inline-block;border:1px solid #b00;color:#b00;padding:1px 8px;font-weight:bold;border-radius:4px}
+  </style></head><body>
+    <div class="lh"><h1>${HOSPITAL.name}</h1><p>${HOSPITAL.addr}</p><p>Tel: ${HOSPITAL.phone} · ${HOSPITAL.email}</p></div>
+    ${body}
+    <div class="foot">Printed ${esc(new Date().toLocaleString())} by ${esc(currentUser?.name||"")}. Computer-generated document.</div>
+  </body></html>`);
+  d.close();
+  setTimeout(()=>{ try{ f.contentWindow.focus(); f.contentWindow.print(); }catch(e){ alert("Printing is not available in this browser."); } }, 300);
+}
+function patientBlock(p){
+  return `<table class="kv"><tr><td>Patient</td><td>${esc(p?.name||"-")}</td></tr><tr><td>Phone</td><td>${esc(p?.phone||"-")}</td></tr>${p?.address?`<tr><td>Address</td><td>${esc(p.address)}</td></tr>`:""}</table>`;
+}
+
+window.v8PrintLab = function(id){
+  const r = db.labRequests.find(x=>x.id===id); if(!r) return;
+  const role = currentUser.role;
+  const ok = role==="admin" || role===ROLE_LAB || (role==="doctor" && (r.requestedBy===currentUser.id || !r.requestedBy)) || (role==="patient" && r.patientId===currentUser.id);
+  if(!ok){ alert("You do not have access to print this request."); return; }
+  const p = getUser(r.patientId), d = getUser(r.requestedBy), done = r.status==="Completed" && r.result;
+  const paid = labPaid(r);
+  printDocument(done?"Laboratory Report":"Laboratory Request Form", `
+    <h2>${done?"LABORATORY REPORT":"LABORATORY REQUEST FORM"}</h2>
+    <table class="kv"><tr><td>Request no.</td><td>${esc(r.id)}</td></tr><tr><td>Date requested</td><td>${esc(fmtDT(r.createdAt))}</td></tr>
+      <tr><td>Priority</td><td>${r.urgency==="Urgent"?`<span class="tag">URGENT</span>`:"Routine"}</td></tr>
+      <tr><td>Payment</td><td>${paid?"Paid":"Not yet paid"}</td></tr></table>
+    <h3>Patient</h3>${patientBlock(p)}
+    <h3>Test requested</h3><table><tr><th>Test</th></tr><tr><td>${esc(r.testName)}</td></tr></table>
+    <h3>Clinical indication / notes</h3><div class="box">${esc(r.notes||"-")}</div>
+    ${done?`<h3>Result</h3><div class="box">${esc(r.result)}</div><table class="kv"><tr><td>Resulted</td><td>${esc(fmtDT(r.resultDate))}</td></tr><tr><td>Processed by</td><td>${esc(r.processedByName||"-")}</td></tr></table>`:""}
+    <div class="sig"><div>Requested by: ${esc(d?.name||"-")}${d?.specialty?" ("+esc(d.specialty)+")":""}<br>Signature / stamp</div><div>${done?"Laboratory technician: "+esc(r.processedByName||""):"Received by laboratory"}<br>Signature / stamp</div></div>`);
+};
+
+window.v8PrintRx = function(id){
+  const rx = db.prescriptions.find(x=>x.id===id); if(!rx) return;
+  const role = currentUser.role;
+  const ok = role==="admin" || role==="pharmacist" || (role==="doctor" && rx.doctorId===currentUser.id) || (role==="patient" && rx.patientId===currentUser.id);
+  if(!ok){ alert("You do not have access to print this prescription."); return; }
+  const p = getUser(rx.patientId), d = getUser(rx.doctorId);
+  const c = rx.appointmentId ? consultByAppt(rx.appointmentId) : null;
+  printDocument("Prescription", `
+    <h2>PRESCRIPTION</h2>
+    <table class="kv"><tr><td>Prescription no.</td><td>${esc(rx.id)}</td></tr><tr><td>Date</td><td>${esc(fmtDT(rx.createdAt))}</td></tr>
+      ${c?.diagnosis?`<tr><td>Diagnosis</td><td>${esc(c.diagnosis)}</td></tr>`:""}</table>
+    <h3>Patient</h3>${patientBlock(p)}
+    <h3>Rx</h3>
+    <table><thead><tr><th>#</th><th>Medicine</th><th>Qty</th><th>Dosage</th><th>Frequency</th><th>Duration</th></tr></thead><tbody>
+      ${(rx.items||[]).map((it,i)=>`<tr><td>${i+1}</td><td>${esc(it.medicineName)}</td><td>${esc(it.quantity)}</td><td>${esc(it.dosage||"-")}</td><td>${esc(it.frequency||"-")}</td><td>${esc(it.duration||"-")}</td></tr>`).join("")}
+    </tbody></table>
+    <div class="sig"><div>Prescriber: ${esc(d?.name||"-")}${d?.specialty?" ("+esc(d.specialty)+")":""}<br>Signature / stamp</div><div>Dispensed by<br>Signature / stamp</div></div>
+    <p class="small" style="font-size:11px;margin-top:14px">Valid only with the prescriber's signature or stamp. Take medicines exactly as directed.</p>`);
+};
+
+/* Doctor / admin prescriptions list, now with a Print button */
+window.renderPrescriptions = function(){
+  if(currentUser.role==="patient"){ navigate("pharmacy"); return; }
+  const list = db.prescriptions.filter(p=>currentUser.role==="doctor" ? p.doctorId===currentUser.id : true).slice().reverse();
+  $("content").innerHTML = `
+    <h1 class="page-title">Prescriptions</h1>
+    <div class="card"><div class="table-wrap"><table>
+      <thead><tr><th>Patient</th><th>Doctor</th><th>Date</th><th>Medicine</th><th>Pharmacy status</th><th></th></tr></thead>
+      <tbody>${list.length ? list.map(p=>{
+        const order = db.pharmacyOrders.find(o=>o.prescriptionId===p.id);
+        return `<tr><td>${esc(getUser(p.patientId)?.name||"-")}</td><td>${esc(getUser(p.doctorId)?.name||"-")}</td><td>${esc(fmtDT(p.createdAt))}</td>
+          <td>${(p.items||[]).map(i=>esc(i.medicineName)).join(", ")}</td><td><span class="badge badge-dark">${esc(order?.status||"-")}</span></td>
+          <td><button class="btn btn-secondary" onclick="v8PrintRx('${p.id}')">🖨 Print</button></td></tr>`;
+      }).join("") : `<tr><td colspan="6"><div class="empty">No prescriptions.</div></td></tr>`}</tbody></table></div></div>`;
+};
+
+/* Patients & pharmacists get a printable list under the pharmacy table */
+const prevRenderPharmacy = window.renderPharmacy;
+window.renderPharmacy = function(){
+  prevRenderPharmacy();
+  if(currentUser.role!=="patient" && currentUser.role!=="pharmacist") return;
+  const list = db.prescriptions.filter(p=>currentUser.role==="pharmacist" || p.patientId===currentUser.id).slice().reverse();
+  if(!list.length) return;
+  $("content").insertAdjacentHTML("beforeend", `<div class="card"><h3>Prescriptions</h3><div class="table-wrap"><table>
+    <thead><tr><th>Date</th>${currentUser.role==="pharmacist"?"<th>Patient</th>":""}<th>Doctor</th><th>Medicines</th><th></th></tr></thead><tbody>
+    ${list.map(p=>`<tr><td>${esc(fmtDT(p.createdAt))}</td>${currentUser.role==="pharmacist"?`<td>${esc(getUser(p.patientId)?.name||"-")}</td>`:""}<td>${esc(getUser(p.doctorId)?.name||"-")}</td>
+      <td>${(p.items||[]).map(i=>esc(i.medicineName)).join(", ")}</td><td><button class="btn btn-secondary" onclick="v8PrintRx('${p.id}')">🖨 Print</button></td></tr>`).join("")}
+    </tbody></table></div></div>`);
+};
+
+/* Offer printing right after a doctor sends a prescription */
+const prevCreatePrescription = window.createPrescription;
+window.createPrescription = function(e){
+  const before = db.prescriptions.length;
+  prevCreatePrescription(e);
+  if(db.prescriptions.length>before){
+    const rx = db.prescriptions[db.prescriptions.length-1];
+    pushActionToast("Prescription sent to the pharmacy.", "🖨 Print prescription", ()=>v8PrintRx(rx.id));
+  }
+};
+
+/* =========================================================
+   INIT
+========================================================= */
+ensureDB();
+saveDB();
+/* If a session was restored before this layer loaded, rebuild the UI with the new features. */
+if(currentUser){ currentUser = getUser(currentUser.id) || currentUser; openApp(); }
+
+})();
+
+
