@@ -79,20 +79,7 @@ const LAB_TESTS = [
 const defaultDB = {
 
   users:[
-    {id:"admin_boniface",name:"Boniface Machogu",email:"boniface@beaconafrica.org",password:"DemoBoniface2026!",role:"admin",phone:"0724741827",enabled:true},
-    {id:"doctor_eunice",name:"Eunice Wanjiku Ngugi",email:"eunice.ngugi@beaconhope.demo",password:"DemoEunice2026!",role:"doctor",specialty:"Clinical Provider",phone:"0700000101",enabled:true,maxBookingsPerDay:10},
-    {id:"doctor_george",name:"George Keitany",email:"george.keitany@beaconhope.demo",password:"DemoGeorge2026!",role:"doctor",specialty:"Clinical Provider",phone:"0700000102",enabled:true,maxBookingsPerDay:10},
-    {id:"doctor_benard",name:"Benard Onyinsi",email:"benard.onyinsi@beaconhope.demo",password:"DemoBenard2026!",role:"doctor",specialty:"Clinical Provider",phone:"0700000103",enabled:true,maxBookingsPerDay:10},
-    {id:"doctor_angela",name:"Angela Mwangi",email:"angela.mwangi@beaconhope.demo",password:"DemoAngela2026!",role:"doctor",specialty:"Clinical Provider",phone:"0700000104",enabled:true,maxBookingsPerDay:10},
-    {id:"nurse_beatrice",name:"Beatrice Gitamo",email:"beatrice.gitamo@beaconhope.demo",password:"DemoBeatrice2026!",role:"nurse",phone:"0700000201",enabled:true,homeServiceProvider:true},
-    {id:"nurse_gerald",name:"Gerald Ragira",email:"gerald.ragira@beaconhope.demo",password:"DemoGerald2026!",role:"nurse",phone:"0700000202",enabled:true,homeServiceProvider:true},
-    {id:"nurse_dennis",name:"Dennis Onami",email:"dennis.onami@beaconhope.demo",password:"DemoDennis2026!",role:"nurse",phone:"0700000203",enabled:true,homeServiceProvider:true},
-    {id:"nurse_caroline",name:"Caroline Wanjiku",email:"caroline.wanjiku@beaconhope.demo",password:"DemoCaroline2026!",role:"nurse",phone:"0700000204",enabled:true,homeServiceProvider:true},
-    {id:"pharmacist_peter",name:"Peter Miano",email:"peter.miano@beaconhope.demo",password:"DemoPeter2026!",role:"pharmacist",phone:"0700000301",enabled:true},
-    {id:"pharmacist_rajab",name:"Rajab Ziada",email:"rajab.ziada@beaconhope.demo",password:"DemoRajab2026!",role:"pharmacist",phone:"0700000302",enabled:true},
-    {id:"rider_dancan",name:"Dancan Bande",email:"dancan.bande@beaconhope.demo",password:"DemoDancan2026!",role:"rider",phone:"0700000401",enabled:true,vehicle:"Motorbike",currentLocation:null},
-    {id:"lab_tech1",name:"Laboratory Technician",email:"lab.technician@beaconhope.demo",password:"DemoLab2026!",role:"lab_technician",phone:"0700000501",enabled:true},
-    {id:"patient1",name:"Demo Patient",email:"patient@beaconhope.demo",password:"Demo123!",role:"patient",phone:"0700000005",enabled:true,address:"Rongai, Nairobi"}
+    {id:"admin_boniface",name:"Boniface Machogu",email:"boniface@beaconafrica.org",role:"admin",phone:"0724741827",enabled:true}
   ],
 
   appointments:[],
@@ -331,10 +318,26 @@ function loadDB(){
     "doctor@beaconhope.demo",
     "specialist@beaconhope.demo",
     "pharmacist@beaconhope.demo",
-    "rider@beaconhope.demo"
+    "rider@beaconhope.demo",
+    "eunice.ngugi@beaconhope.demo",
+    "george.keitany@beaconhope.demo",
+    "benard.onyinsi@beaconhope.demo",
+    "angela.mwangi@beaconhope.demo",
+    "beatrice.gitamo@beaconhope.demo",
+    "gerald.ragira@beaconhope.demo",
+    "dennis.onami@beaconhope.demo",
+    "caroline.wanjiku@beaconhope.demo",
+    "peter.miano@beaconhope.demo",
+    "rajab.ziada@beaconhope.demo",
+    "dancan.bande@beaconhope.demo",
+    "lab.technician@beaconhope.demo",
+    "patient@beaconhope.demo"
   ]);
   const legacyDemoIds = new Set([
-    "admin1","doctor1","doctor2","pharmacist1","rider1"
+    "admin1","doctor1","doctor2","pharmacist1","rider1",
+    "doctor_eunice","doctor_george","doctor_benard","doctor_angela",
+    "nurse_beatrice","nurse_gerald","nurse_dennis","nurse_caroline",
+    "pharmacist_peter","pharmacist_rajab","rider_dancan","lab_tech1","patient1"
   ]);
   data.users = data.users.filter(u => !legacyDemoEmails.has(String(u.email||"").toLowerCase()) && !legacyDemoIds.has(u.id));
 
@@ -347,13 +350,13 @@ function loadDB(){
            !removedUserNames.has(email.split("@")[0]);
   });
 
-  /* Ensure all current demo/staff accounts are present. */
+  /* Ensure the initial administrator is present. */
   defaultDB.users.forEach(defaultUser=>{
     const existing = data.users.find(u=>u.email===defaultUser.email);
     if(!existing){
       data.users.push(JSON.parse(JSON.stringify(defaultUser)));
     } else {
-      /* Keep the current demo account identity/role/password in sync. */
+      /* Keep the initial administrator identity and role in sync. */
       Object.assign(existing, JSON.parse(JSON.stringify(defaultUser)));
     }
   });
@@ -573,12 +576,12 @@ function showMandatoryPasswordChange(user){
 
       <div class="form-group">
         <label>New Password</label>
-        <input id="mandatoryNewPassword" type="password" class="form-control" minlength="6" required>
+        <input id="mandatoryNewPassword" type="password" class="form-control" minlength="8" required>
       </div>
 
       <div class="form-group">
         <label>Confirm New Password</label>
-        <input id="mandatoryNewPassword2" type="password" class="form-control" minlength="6" required>
+        <input id="mandatoryNewPassword2" type="password" class="form-control" minlength="8" required>
       </div>
 
       <button class="btn btn-primary btn-block">Set Password & Continue</button>
@@ -590,7 +593,7 @@ function showMandatoryPasswordChange(user){
   openModal();
 }
 
-function submitMandatoryPasswordChange(e,userId){
+async function submitMandatoryPasswordChange(e,userId){
 
   e.preventDefault();
 
@@ -606,24 +609,24 @@ function submitMandatoryPasswordChange(e,userId){
     return;
   }
 
-  user.password=p1;
-  user.mustChangePassword=false;
-
-  saveDB();
-
-  closeModal();
-
-  currentUser=user;
-
-  localStorage.setItem(
-    "beaconHopeCurrentUser",
-    JSON.stringify(user)
-  );
-
-  document.getElementById("loginEmail").value="";
-  document.getElementById("loginPassword").value="";
-
-  openApp();
+  const submitButton=e.currentTarget.querySelector("button[type='submit'], button:not([type])");
+  if(submitButton) submitButton.disabled=true;
+  try{
+    const updatedUser=await apiRequest("/auth/change-password",{
+      method:"POST",
+      body:JSON.stringify({password:p1})
+    });
+    currentUser=cacheBackendUser(updatedUser);
+    localStorage.setItem("beaconHopeCurrentUser",JSON.stringify(currentUser));
+    closeModal();
+    document.getElementById("loginEmail").value="";
+    document.getElementById("loginPassword").value="";
+    openApp();
+  }catch(error){
+    alert(error.message||"Unable to update your password.");
+  }finally{
+    if(submitButton) submitButton.disabled=false;
+  }
 }
 
 
@@ -906,6 +909,7 @@ doctor:"Doctor",
 nurse:"Nursing Officer",
 pharmacist:"Pharmacist",
 rider:"Rider",
+lab_technician:"Laboratory Technician",
 patient:"Patient"
 };
 
@@ -7202,7 +7206,7 @@ renderInventory();
 ADMIN USERS
 ========================================================= */
 
-function renderUsers(){
+async function renderUsers(){
 
 if(
 currentUser.role!=="admin"
@@ -7210,32 +7214,49 @@ currentUser.role!=="admin"
 return;
 }
 
-document.getElementById(
-"content"
-).innerHTML=`
+const content=document.getElementById("content");
+content.innerHTML=`
+  <h1 class="page-title">
+    User Management
+    <button class="btn btn-primary" onclick="showAdminAddUser()">
+      + Add User
+    </button>
+  </h1>
+  <div class="card">Loading users...</div>
+`;
 
+let users;
+try{
+  const apiUsers=await apiRequest("/users");
+  users=apiUsers.map(cacheBackendUser);
+}catch(error){
+  content.innerHTML=`
+    <h1 class="page-title">
+      User Management
+      <button class="btn btn-primary" onclick="showAdminAddUser()">
+        + Add User
+      </button>
+    </h1>
+    <div class="alert alert-danger">
+      Unable to load users from the database: ${escapeHTML(error.message||"Please try again.")}
+      <button class="btn btn-secondary" onclick="renderUsers()">Retry</button>
+    </div>
+  `;
+  return;
+}
 
+content.innerHTML=`
 <h1 class="page-title">
-
   User Management
-
-  <button
-    class="btn btn-primary"
-    onclick="showAdminAddUser()"
-  >
+  <button class="btn btn-primary" onclick="showAdminAddUser()">
     + Add User
   </button>
-
 </h1>
 
 <div class="card">
-
   <div class="table-wrap">
-
     <table>
-
       <tr>
-
         <th>Name</th>
         <th>Email</th>
         <th>Role</th>
@@ -7243,93 +7264,35 @@ document.getElementById(
         <th>Patient Status</th>
         <th>Status</th>
         <th>Action</th>
-
       </tr>
 
-      ${db.users.map(u=>`
-
+      ${users.length ? users.map(u=>`
         <tr>
-
+          <td>${escapeHTML(u.name)}</td>
+          <td>${escapeHTML(u.email)}</td>
+          <td>${formatRole(u.role)}</td>
+          <td>${escapeHTML(u.specialty||"-")}</td>
+          <td>${u.role==="patient" ? patientStatusBadge(u.id) : "-"}</td>
           <td>
-            ${escapeHTML(u.name)}
-          </td>
-
-          <td>
-            ${escapeHTML(u.email)}
-          </td>
-
-          <td>
-            ${formatRole(u.role)}
-          </td>
-
-          <td>
-            ${escapeHTML(
-              u.specialty||"-"
-            )}
-          </td>
-
-          <td>
-            ${u.role==="patient" ? patientStatusBadge(u.id) : "-"}
-          </td>
-
-          <td>
-
-            <span class="badge ${
-              u.enabled
-              ? "badge-success"
-              : "badge-danger"
-            }">
-
-              ${
-                u.enabled
-                ? "Enabled"
-                : "Disabled"
-              }
-
+            <span class="badge ${u.enabled ? "badge-success" : "badge-danger"}">
+              ${u.enabled ? "Enabled" : "Disabled"}
             </span>
-
           </td>
-
           <td>
-
-            <button
-              class="btn ${
-                u.enabled
-                ? "btn-danger"
-                : "btn-success"
-              }"
-              onclick="toggleUser('${u.id}')"
-            >
-
-              ${
-                u.enabled
-                ? "Disable"
-                : "Enable"
-              }
-
+            <button class="btn ${u.enabled ? "btn-danger" : "btn-success"}"
+                    onclick="toggleUser('${u.id}')">
+              ${u.enabled ? "Disable" : "Enable"}
             </button>
-
-            <button
-              class="btn btn-secondary"
-              onclick="regenerateUserCode('${u.id}')"
-            >
+            <button class="btn btn-secondary" onclick="regenerateUserCode('${u.id}')">
               🔐 New Code
             </button>
-
             ${u.role==="patient" ? `<button class="btn btn-primary" onclick="togglePatientStatusOverride('${u.id}')">${u.patientStatusOverride==="returning" ? "↩ Use Record Status" : "✓ Verify Returning"}</button>` : ""}
-
           </td>
-
         </tr>
-
-      `).join("")}
-
+      `).join("") : `<tr><td colspan="7">No users have been added yet.</td></tr>`}
     </table>
-
   </div>
-
 </div>
-
 `;
 }
 
@@ -7425,12 +7388,12 @@ document.getElementById(
       onchange="toggleAdminSpecialty()"
     >
 
-      <option value="patient">
-        Patient
-      </option>
-
       <option value="doctor">
         Doctor
+      </option>
+
+      <option value="nurse">
+        Nursing Officer
       </option>
 
       <option value="pharmacist">
@@ -7442,10 +7405,6 @@ document.getElementById(
 
       <option value="rider">
         Rider
-      </option>
-
-      <option value="admin">
-        Administrator
       </option>
 
     </select>
@@ -7501,22 +7460,6 @@ document.getElementById(
 openModal();
 }
 
-function generateLoginCode(){
-
-  /* 8-character alphanumeric code, uppercase, unambiguous characters only */
-  const chars="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-
-  let code="";
-
-  for(let i=0;i<8;i++){
-    code+=chars.charAt(
-      Math.floor(Math.random()*chars.length)
-    );
-  }
-
-  return code;
-}
-
 function toggleAdminSpecialty(){
 
 const role=
@@ -7534,7 +7477,7 @@ role!=="doctor"
 );
 }
 
-function adminAddUser(e){
+async function adminAddUser(e){
 
 e.preventDefault();
 
@@ -7565,75 +7508,35 @@ document.getElementById(
 "adminUserRole"
 ).value;
 
-const loginCode=
-  generateLoginCode();
-
-const user={
-
-
-id:uid(role),
-
-name:
-  document.getElementById(
-    "adminUserName"
-  ).value,
-
-email,
-
-phone:
-  document.getElementById(
-    "adminUserPhone"
-  ).value,
-
-password:
-  loginCode,
-
-mustChangePassword:true,
-
-role,
-
-enabled:true,
-
-address:
-  document.getElementById(
-    "adminUserAddress"
-  ).value,
-
-lat:null,
-
-lng:null,
-
-patientStatusOverride:role==="patient" ? null : undefined
-
-};
-
-if(role==="doctor"){
-
-
-user.specialty=
-  document.getElementById(
-    "adminUserSpecialty"
-  ).value;
-
-user.maxBookingsPerDay=10;
-
+const submitButton=e.currentTarget.querySelector("button[type='submit'], button:not([type])");
+if(submitButton) submitButton.disabled=true;
+let user;
+let loginCode;
+try{
+  const created=await apiRequest("/users",{
+    method:"POST",
+    body:JSON.stringify({
+      name:document.getElementById("adminUserName").value.trim(),
+      email,
+      phone:document.getElementById("adminUserPhone").value.trim(),
+      address:document.getElementById("adminUserAddress").value.trim(),
+      role,
+      specialty:role==="doctor"
+        ? document.getElementById("adminUserSpecialty").value
+        : undefined
+    })
+  });
+  const {temporaryPassword,...apiUser}=created;
+  loginCode=temporaryPassword;
+  if(typeof loginCode!=="string"||!loginCode){
+    throw new Error("The server did not return a temporary password.");
+  }
+  user=cacheBackendUser(apiUser);
+}catch(error){
+  alert(error.message||"Unable to create this user.");
+  if(submitButton) submitButton.disabled=false;
+  return;
 }
-
-if(role==="rider"){
-
-
-user.currentLocation=null;
-
-}
-
-db.users.push(user);
-
-notify(
-user.id,
-`Welcome to Beacon of Hope Hospital. Your login code is ${loginCode}. Sign in with your email and this code, then set your own password.`
-);
-
-saveDB();
 
 document.getElementById("modalContent").innerHTML=`
 
@@ -7649,7 +7552,7 @@ document.getElementById("modalContent").innerHTML=`
 
   <div class="alert alert-warning">
 
-    <strong>Login code (simulated email):</strong>
+    <strong>Temporary login code:</strong>
 
     <div style="font-size:26px;font-weight:bold;letter-spacing:3px;margin:8px 0;color:var(--primary)">
       ${escapeHTML(loginCode)}
@@ -7657,8 +7560,7 @@ document.getElementById("modalContent").innerHTML=`
 
     Share this code with the user. They sign in with their
     <strong>email</strong> and this <strong>code</strong> as the
-    password, and will be required to set their own password on
-    first login.
+    password, then set their own password on first login.
 
     <br><br>
 
@@ -7678,7 +7580,7 @@ document.getElementById("modalContent").innerHTML=`
 openModal();
 }
 
-function regenerateUserCode(userId){
+async function regenerateUserCode(userId){
 
 const user=getUser(userId);
 
@@ -7688,17 +7590,22 @@ if(!confirm(`Generate a new login code for ${user.name}? Their current password 
 return;
 }
 
-const loginCode=generateLoginCode();
+let result;
+try{
+  result=await apiRequest(`/users/${encodeURIComponent(userId)}/reset-password`,{
+    method:"POST"
+  });
+}catch(error){
+  alert(error.message||"Unable to reset this user's login code.");
+  return;
+}
 
-user.password=loginCode;
-user.mustChangePassword=true;
-
-saveDB();
-
-notify(
-user.id,
-`Your login code has been reset by the administrator. New code: ${loginCode}. Sign in with your email and this code, then set a new password.`
-);
+const {temporaryPassword,...apiUser}=result;
+if(typeof temporaryPassword!=="string"||!temporaryPassword){
+  alert("The server did not return a new temporary password.");
+  return;
+}
+cacheBackendUser(apiUser);
 
 document.getElementById("modalContent").innerHTML=`
 
@@ -7709,7 +7616,7 @@ document.getElementById("modalContent").innerHTML=`
     <strong>${escapeHTML(user.name)}</strong> (${escapeHTML(user.email)})
 
     <div style="font-size:26px;font-weight:bold;letter-spacing:3px;margin:8px 0;color:var(--primary)">
-      ${escapeHTML(loginCode)}
+      ${escapeHTML(temporaryPassword)}
     </div>
 
     The user must sign in with this code and will be required to
@@ -8348,7 +8255,11 @@ window.beaconLogin = async function(event){
     localStorage.setItem(AUTH_TOKEN_KEY, result.token);
     currentUser = user;
     localStorage.setItem("beaconHopeCurrentUser", JSON.stringify(user));
-    openApp();
+    if(user.mustChangePassword){
+      showMandatoryPasswordChange(user);
+    }else{
+      openApp();
+    }
   }catch(error){
     alert(error.message || "Unable to sign in. Please try again.");
   }finally{

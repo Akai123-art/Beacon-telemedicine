@@ -2,6 +2,8 @@
 
 Run `pip install -r requirements.txt`, then `python app.py`.
 Open http://127.0.0.1:5000/ for the frontend; API routes are under /api.
+The initial administrator is Boniface Machogu (boniface@beaconafrica.org);
+set BEACON_ADMIN_PASSWORD to change the default password before deployment.
 """
 # Cell 2 - imports, config and a small SQLite document store
 import os
@@ -14,7 +16,10 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 DB_FILE = os.environ.get("BEACON_DB_FILE", str(Path(__file__).resolve().with_name("beacon_hospital.db")))
 SECRET_KEY = os.environ.get("BEACON_SECRET_KEY") or secrets.token_hex(32)
-DEMO_PASSWORD = "Demo@1234"             # password given to all seeded demo accounts
+ADMIN_PASSWORD = os.environ.get("BEACON_ADMIN_PASSWORD", "Admin@1234")
+LEGACY_ADMIN_PASSWORD = "Demo@1234"
+if len(ADMIN_PASSWORD) < 8:
+    raise ValueError("BEACON_ADMIN_PASSWORD must be at least 8 characters")
 HOSPITAL = {"name": "Beacon of Hope Hospital", "lat": -1.3998, "lng": 36.7584,
             "phone": "0720876123", "email": "hospital@beaconafrica.org"}
 
@@ -70,27 +75,20 @@ SERVICE_CATALOG = [
     {"id": "svc_physio_virtual", "name": "Virtual physiotherapy", "price": "KES 750"},
     {"id": "svc_nursing_virtual", "name": "Virtual nursing advice", "price": "KES 500"}]
 
-SEED_USERS = [
-    ("admin_boniface", "Boniface Machogu", "admin", "boniface@beaconafrica.org", "0724741827"),
-    ("doctor_eunice", "Eunice Wanjiku Ngugi", "doctor", "eunice.ngugi@beaconhope.demo", "0700000101"),
-    ("doctor_george", "George Keitany", "doctor", "george.keitany@beaconhope.demo", "0700000102"),
-    ("doctor_benard", "Benard Onyinsi", "doctor", "benard.onyinsi@beaconhope.demo", "0700000103"),
-    ("doctor_angela", "Angela Mwangi", "doctor", "angela.mwangi@beaconhope.demo", "0700000104"),
-    ("nurse_beatrice", "Beatrice Gitamo", "nurse", "beatrice.gitamo@beaconhope.demo", "0700000201"),
-    ("nurse_gerald", "Gerald Ragira", "nurse", "gerald.ragira@beaconhope.demo", "0700000202"),
-    ("pharmacist_peter", "Peter Miano", "pharmacist", "peter.miano@beaconhope.demo", "0700000301"),
-    ("rider_dancan", "Dancan Bande", "rider", "dancan.bande@beaconhope.demo", "0700000401"),
-    ("patient1", "Demo Patient", "patient", "patient@beaconhope.demo", "0700000005"),
-]
 SEED_INVENTORY = [("med1", "Amoxicillin 500mg", 25, 100), ("med2", "Paracetamol 500mg", 10, 200),
                   ("med3", "Cetirizine 10mg", 20, 80)]
 
 def seed():
-    if not all_("users"):
-        for id_, name, role, email, phone in SEED_USERS:
-            put("users", {"id": id_, "name": name, "role": role, "email": email, "phone": phone,
-                          "enabled": True, "passwordHash": generate_password_hash(DEMO_PASSWORD),
-                          "createdAt": now()})
+    admin = get("users", "admin_boniface")
+    if not all_("users", role="admin"):
+        put("users", {"id": "admin_boniface", "name": "Boniface Machogu", "role": "admin",
+                      "email": "boniface@beaconafrica.org", "phone": "0724741827", "enabled": True,
+                      "mustChangePassword": True,
+                      "passwordHash": generate_password_hash(ADMIN_PASSWORD), "createdAt": now()})
+    elif admin and check_password_hash(admin["passwordHash"], LEGACY_ADMIN_PASSWORD):
+        admin["passwordHash"] = generate_password_hash(ADMIN_PASSWORD)
+        admin["mustChangePassword"] = True
+        put("users", admin)
     if not all_("inventory"):
         for id_, name, price, qty in SEED_INVENTORY:
             put("inventory", {"id": id_, "name": name, "price": price, "quantity": qty,
@@ -187,6 +185,15 @@ def login():
     if not user.get("enabled", True): return err("Account disabled", 403)
     return jsonify({"token": serializer.dumps({"id": user["id"]}), "user": public(user)})
 
+@app.post("/api/auth/change-password")
+@auth()
+def change_password():
+    password = body().get("password", "")
+    if len(password) < 8: return err("Password must be at least 8 characters")
+    user = update("users", g.user["id"], passwordHash=generate_password_hash(password),
+                  mustChangePassword=False)
+    return jsonify(public(user))
+
 @app.get("/api/me")
 @auth()
 def me(): return jsonify(public(g.user))
@@ -201,14 +208,34 @@ def list_users():
 @auth("admin")
 def create_user():
     d = body()
-    if d.get("role") not in ("doctor", "nurse", "pharmacist", "rider", "admin", "patient"): return err("Invalid role")
-    if not d.get("email") or not d.get("name"): return err("name and email are required")
-    if any(u["email"].lower() == d["email"].lower() for u in all_("users")): return err("Email already registered", 409)
-    password = d.get("password") or secrets.token_urlsafe(8)
-    user = put("users", {"id": uid(d["role"]), "name": d["name"], "role": d["role"], "email": d["email"],
-                         "phone": d.get("phone", ""), "enabled": True,
+    role = d.get("role")
+    if role not in ("doctor", "nurse", "pharmacist", "rider", "lab_technician"): return err("Invalid role")
+    name = d.get("name")
+    email = d.get("email")
+    if not isinstance(name, str) or not name.strip() or not isinstance(email, str) or not email.strip():
+        return err("name and email are required")
+    email = email.strip().lower()
+    if any(u["email"].lower() == email for u in all_("users")): return err("Email already registered", 409)
+    password = secrets.token_urlsafe(8)
+    user = put("users", {"id": uid(role), "name": name.strip(), "role": role, "email": email,
+                         "phone": d.get("phone", ""), "address": d.get("address", ""), "enabled": True,
+                         "mustChangePassword": True,
+                         **({"specialty": d.get("specialty", "Clinical Provider"),
+                             "maxBookingsPerDay": 10} if role == "doctor" else {}),
+                         **({"homeServiceProvider": True} if role == "nurse" else {}),
+                         **({"currentLocation": None} if role == "rider" else {}),
                          "passwordHash": generate_password_hash(password), "createdAt": now()})
     return jsonify({**public(user), "temporaryPassword": password}), 201
+
+@app.post("/api/users/<uid_>/reset-password")
+@auth("admin")
+def reset_user_password(uid_):
+    user = get("users", uid_)
+    if not user: return err("User not found", 404)
+    password = secrets.token_urlsafe(8)
+    user = update("users", uid_, passwordHash=generate_password_hash(password),
+                  mustChangePassword=True)
+    return jsonify({**public(user), "temporaryPassword": password})
 
 @app.patch("/api/users/<uid_>")
 @auth("admin")
