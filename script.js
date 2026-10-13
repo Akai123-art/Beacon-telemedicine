@@ -233,6 +233,53 @@ let currentPage = "dashboard";
 let consultIntervals = {};
 
 let riderWatchId = null;
+const AUTH_TOKEN_KEY = "beaconHopeAuthToken";
+const API_BASE_URL = `${window.location.origin}/api`;
+localStorage.removeItem("beaconHopeCurrentUser");
+
+async function apiRequest(path, options={}){
+  const headers = new Headers(options.headers || {});
+  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  if(token) headers.set("Authorization", `Bearer ${token}`);
+  if(options.body && !headers.has("Content-Type")){
+    headers.set("Content-Type", "application/json");
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers
+  });
+  const responseText = await response.text();
+  let data = {};
+  if(responseText){
+    try{
+      data = JSON.parse(responseText);
+    }catch{
+      data = {error: responseText};
+    }
+  }
+  if(!response.ok){
+    const error = new Error(data.error || `Request failed (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+
+function cacheBackendUser(apiUser){
+  const existingIndex = db.users.findIndex(user =>
+    user.id === apiUser.id ||
+    user.email?.toLowerCase() === apiUser.email?.toLowerCase()
+  );
+  const existing = existingIndex >= 0 ? db.users[existingIndex] : {};
+  const user = {...existing, ...apiUser};
+  delete user.password;
+  delete user.passwordHash;
+  if(existingIndex >= 0) db.users[existingIndex] = user;
+  else db.users.push(user);
+  saveDB();
+  return user;
+}
 
 
 /* =========================================================
@@ -447,7 +494,7 @@ document
   .getElementById("loginForm")
   .addEventListener(
     "submit",
-    login
+    event => window.beaconLogin(event)
   );
 
 
@@ -584,6 +631,8 @@ function logout(){
 
   currentUser=null;
 
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+
   localStorage.removeItem(
     "beaconHopeCurrentUser"
   );
@@ -675,6 +724,7 @@ function showRegistration(){
         id="regPassword"
         type="password"
         class="form-control"
+        minlength="8"
         required
       >
     </div>
@@ -685,6 +735,7 @@ function showRegistration(){
         id="regPassword2"
         type="password"
         class="form-control"
+        minlength="8"
         required
       >
     </div>
@@ -8280,6 +8331,81 @@ localStorage.removeItem(
 
 })();
 
+/* Authenticate account access through the Flask API. */
+window.beaconLogin = async function(event){
+  event.preventDefault();
+  const email = document.getElementById("loginEmail").value.trim().toLowerCase();
+  const password = document.getElementById("loginPassword").value;
+  const submitButton = event.currentTarget.querySelector('button[type="submit"], button:not([type])');
+
+  if(submitButton) submitButton.disabled = true;
+  try{
+    const result = await apiRequest("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({email, password})
+    });
+    const user = cacheBackendUser(result.user);
+    localStorage.setItem(AUTH_TOKEN_KEY, result.token);
+    currentUser = user;
+    localStorage.setItem("beaconHopeCurrentUser", JSON.stringify(user));
+    openApp();
+  }catch(error){
+    alert(error.message || "Unable to sign in. Please try again.");
+  }finally{
+    if(submitButton) submitButton.disabled = false;
+  }
+};
+
+window.registerPatient = async function(event){
+  event.preventDefault();
+  const name = document.getElementById("regName").value.trim();
+  const email = document.getElementById("regEmail").value.trim().toLowerCase();
+  const phone = document.getElementById("regPhone").value.trim();
+  const address = document.getElementById("regAddress").value.trim();
+  const password = document.getElementById("regPassword").value;
+  const passwordConfirmation = document.getElementById("regPassword2").value;
+
+  if(password !== passwordConfirmation){
+    alert("Passwords do not match.");
+    return;
+  }
+
+  const submitButton = event.currentTarget.querySelector('button[type="submit"], button:not([type])');
+  if(submitButton) submitButton.disabled = true;
+  try{
+    const user = await apiRequest("/auth/register", {
+      method: "POST",
+      body: JSON.stringify({name, email, phone, address, password})
+    });
+    cacheBackendUser(user);
+    closeModal();
+    alert("Patient account created successfully. You can now sign in.");
+    document.getElementById("loginEmail").value = email;
+    document.getElementById("loginPassword").value = "";
+  }catch(error){
+    alert(error.message || "Unable to create your account. Please try again.");
+  }finally{
+    if(submitButton) submitButton.disabled = false;
+  }
+};
+
+const savedAuthToken = localStorage.getItem(AUTH_TOKEN_KEY);
+if(savedAuthToken){
+  apiRequest("/me")
+    .then(userData => {
+      currentUser = cacheBackendUser(userData);
+      localStorage.setItem("beaconHopeCurrentUser", JSON.stringify(currentUser));
+      openApp();
+    })
+    .catch(error => {
+      if(error.status === 401 || error.status === 403){
+        localStorage.removeItem(AUTH_TOKEN_KEY);
+        localStorage.removeItem("beaconHopeCurrentUser");
+      }else{
+        console.error("Unable to restore API session:", error);
+      }
+    });
+}
 /* =========================================================
 SAVE BEFORE EXIT
 ========================================================= */
@@ -12057,5 +12183,3 @@ saveDB();
 if(currentUser){ currentUser = getUser(currentUser.id) || currentUser; openApp(); }
 
 })();
-
-
