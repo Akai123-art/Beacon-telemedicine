@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Beacon of Hope Hospital | Telemedicine</title>
+
+<link rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+
+<link rel="stylesheet" href="styles.css">
+
+</head>
+
+<body>
+
+<!-- =========================================================
+LOGIN
+========================================================= -->
+
+<div id="loginPage" class="login-page">
+
+  <div class="login-container">
+
+
+<div class="login-info login-hero">
+  <img src="https://images.unsplash.com/photo-1584982751601-97dcc096659c?auto=format&fit=crop&w=1200&q=85" alt="Telemedicine consultation">
+  <div class="login-hero-overlay">
+    <div>
+      <div class="badge" style="background:rgba(255,255,255,.18);color:#fff;margin-bottom:12px">24/7 DIGITAL HEALTH ACCESS</div>
+      <h1>Beacon of Hope Hospital</h1>
+      <p>Ongata Rongai — Telemedicine, Physical Booking & Medicine Delivery</p>
+      <h2>Healthcare from wherever you are</h2>
+      <p>Book a virtual consultation or physical hospital visit, access home services, receive doctor-prescribed medicines and track deliveries.</p>
+      <div class="feature"><div class="feature-icon">👨‍⚕️</div><div><strong>Telemedicine</strong><div class="small">Video or audio consultations with our doctors.</div></div></div>
+      <div class="feature"><div class="feature-icon">🏥</div><div><strong>Physical Booking</strong><div class="small">Reserve a hospital appointment before you come in.</div></div></div>
+      <div class="feature"><div class="feature-icon">💊</div><div><strong>Pharmacy & Delivery</strong><div class="small">Doctor-prescribed medicines delivered to you.</div></div></div>
+      <div class="feature"><div class="feature-icon">🏠</div><div><strong>Home Services</strong><div class="small">Request services such as wound dressing at home.</div></div></div>
+    </div>
+  </div>
+</div>
+
+<div class="login-box">
+
+  <h2>Sign in</h2>
+
+  <p class="text-muted">
+    Access your Beacon of Hope account.
+  </p>
+
+  <form id="loginForm">
+
+    <div class="form-group">
+      <label>Email</label>
+      <input
+        id="loginEmail"
+        class="form-control"
+        type="email"
+        placeholder="you@example.com"
+        required
+      >
+    </div>
+
+    <div class="form-group">
+      <label>Password</label>
+      <input
+        id="loginPassword"
+        class="form-control"
+        type="password"
+        placeholder="Password"
+        required
+      >
+    </div>
+
+    <button class="btn btn-primary btn-block">
+      Sign In
+    </button>
+
+  </form>
+
+  <div class="login-tools">
+    <button type="button" class="login-tool" onclick="showForgotPassword()">🔐 Forgot Password</button>
+    <button type="button" class="login-tool" onclick="showEnquiries()">📞 Enquiries & Support</button>
+    <button type="button" class="login-tool" onclick="showServiceChatbot()">🤖 Service Assistant</button>
+  </div>
+
+  <div class="new-patient-box">
+
+    <strong>New patient?</strong>
+
+    <p class="small">
+      Create your own patient account.
+    </p>
+
+    <button
+      class="btn btn-secondary"
+      onclick="showRegistration()"
+    >
+      Create Patient Account
+    </button>
+
+  </div>
+
+  <div class="demo-login">
+    <strong>Current Demo Accounts</strong>
+    <p class="small text-muted" style="margin:6px 0 12px">Use these accounts to test each current staff role and the patient experience.</p>
+
+    <div class="table-wrap">
+      <table style="font-size:12px">
+        <thead><tr><th>Role</th><th>Name</th><th>Email</th><th>Password</th></tr></thead>
+        <tbody>
+          <tr><td>Administrator</td><td>Boniface Machogu</td><td>boniface@beaconafrica.org</td><td>DemoBoniface2026!</td></tr>
+          <tr><td>Doctor</td><td>Eunice Wanjiku Ngugi</td><td>eunice.ngugi@beaconhope.demo</td><td>DemoEunice2026!</td></tr>
+          <tr><td>Doctor</td><td>George Keitany</td><td>george.keitany@beaconhope.demo</td><td>DemoGeorge2026!</td></tr>
+          <tr><td>Doctor</td><td>Benard Onyinsi</td><td>benard.onyinsi@beaconhope.demo</td><td>DemoBenard2026!</td></tr>
+          <tr><td>Doctor</td><td>Angela Mwangi</td><td>angela.mwangi@beaconhope.demo</td><td>DemoAngela2026!</td></tr>
+          <tr><td>Nursing Officer</td><td>Beatrice Gitamo</td><td>beatrice.gitamo@beaconhope.demo</td><td>DemoBeatrice2026!</td></tr>
+          <tr><td>Nursing Officer</td><td>Gerald Ragira</td><td>gerald.ragira@beaconhope.demo</td><td>DemoGerald2026!</td></tr>
+          <tr><td>Nursing Officer</td><td>Dennis Onami</td><td>dennis.onami@beaconhope.demo</td><td>DemoDennis2026!</td></tr>
+          <tr><td>Nursing Officer</td><td>Caroline Wanjiku</td><td>caroline.wanjiku@beaconhope.demo</td><td>DemoCaroline2026!</td></tr>
+          <tr><td>Pharmacist</td><td>Peter Miano</td><td>peter.miano@beaconhope.demo</td><td>DemoPeter2026!</td></tr>
+          <tr><td>Pharmacist</td><td>Rajab Ziada</td><td>rajab.ziada@beaconhope.demo</td><td>DemoRajab2026!</td></tr>
+          <tr><td>Rider</td><td>Dancan Bande</td><td>dancan.bande@beaconhope.demo</td><td>DemoDancan2026!</td></tr>
+          <tr><td>Laboratory Technician</td><td>Laboratory Technician</td><td>lab.technician@beaconhope.demo</td><td>DemoLab2026!</td></tr>
+          <tr><td>Patient</td><td>Demo Patient</td><td>patient@beaconhope.demo</td><td>Demo123!</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+  </div>
+
+</div>
+
+<!-- =========================================================
+APPLICATION
+========================================================= -->
+
+<div id="app" class="app hidden">
+
+  <header class="topbar">
+
+
+<div class="brand">
+
+  <button
+    class="mobile-menu"
+    onclick="toggleSidebar()"
+  >
+    ☰
+  </button>
+
+  <div class="logo">+</div>
+
+  <span>Beacon of Hope Hospital</span>
+
+</div>
+
+<div class="user-area">
+
+  <div>
+    <div class="user-name" id="topUserName"></div>
+    <div class="small text-muted" id="topUserRole"></div>
+  </div>
+
+  <div class="user-avatar" id="userAvatar">U</div>
+
+  <button
+    class="btn btn-secondary"
+    onclick="logout()"
+  >
+    Logout
+  </button>
+
+</div>
+
+  </header>
+
+  <div class="layout">
+
+
+<aside id="sidebar" class="sidebar"></aside>
+
+<main id="content" class="content"></main>
+
+  </div>
+
+</div>
+
+<!-- MODAL -->
+
+<div id="modal" class="modal-overlay hidden">
+  <div id="modalContent" class="modal"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="script.js"></script>
+
+
+
+
+
+
+
+
+
+</body>
+</html>
