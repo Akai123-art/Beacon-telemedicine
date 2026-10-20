@@ -253,6 +253,42 @@ async function apiRequest(path, options={}){
   return data;
 }
 
+async function refreshInventory(){
+  const items=await apiRequest("/inventory");
+  db.inventory=items;
+  saveDB();
+  return items;
+}
+
+async function refreshLabRequests(){
+  const rows=await apiRequest("/lab-requests");
+  db.labRequests=rows.map(row=>({
+    ...row,
+    testName:row.testName||row.tests?.join(", ")||"Laboratory test",
+    result:row.result??row.results??null
+  }));
+  saveDB();
+  return db.labRequests;
+}
+
+async function refreshPharmacyOrders(){
+  const rows=await apiRequest("/pharmacy/orders");
+  const remote=rows.map(row=>({
+    ...row,
+    items:(row.items||[]).map(item=>({
+      ...item,
+      medicineName:item.medicineName||item.name||"Medicine"
+    }))
+  }));
+  const remoteIds=new Set(remote.map(order=>order.id));
+  db.pharmacyOrders=[
+    ...db.pharmacyOrders.filter(order=>!remoteIds.has(order.id)),
+    ...remote
+  ];
+  saveDB();
+  return remote;
+}
+
 function cacheBackendUser(apiUser){
   const existingIndex = db.users.findIndex(user =>
     user.id === apiUser.id ||
@@ -1233,39 +1269,39 @@ function makePageContent(){
  return content;
 }
 
-function renderAdminDashboard(){
+async function renderAdminDashboard(){
  const content = makePageContent();
- const patients = db.users.filter(u => u.role === "patient").length;
- const doctors = db.users.filter(u => u.role === "doctor").length;
- const paidInvoices = db.invoices.filter(i => i.status === "Paid");
- const revenue = paidInvoices.reduce((sum, i) => sum + Number(i.total), 0);
- const paidDeliveries = db.deliveries.filter(d =>
-   d.status === "Paid - Awaiting Dispatch" ||
-   d.status === "Assigned" ||
-   d.status === "Picked Up" ||
-   d.status === "In Transit"
- ).length;
- const pendingPayments = db.invoices.filter(i => i.status === "Pending").length;
- const homeRequests = db.homeServices.length;
- const pharmacyOrders = db.pharmacyOrders.length;
+ const adminId = currentUser?.id;
+ content.innerHTML = '<h1 class="page-title">Administrator Dashboard</h1><div class="card">Loading current hospital figures...</div>';
+ let dashboard;
+ try{
+   const report = await apiRequest("/admin/report");
+   dashboard = report.dashboard;
+   if(!dashboard) throw new Error("The server returned an incomplete dashboard report.");
+ }catch(error){
+   if(currentUser?.id !== adminId || currentPage !== "dashboard") return;
+   content.innerHTML = `<h1 class="page-title">Administrator Dashboard</h1><div class="alert alert-danger">Unable to load current hospital figures: ${escapeHTML(error.message||"Please try again.")} <button class="btn btn-secondary" onclick="renderDashboard()">Retry</button></div>`;
+   return;
+ }
+ if(currentUser?.id !== adminId || currentPage !== "dashboard") return;
 
  const title = createElement("h1", "page-title", "Administrator Dashboard");
- const subtitle = createElement("p", "text-muted", "Complete operational overview.");
+ const subtitle = createElement("p", "text-muted", "Current figures from the hospital database.");
 
  const stats = createElement("div", "grid grid-4");
  appendChildren(stats,
-   makeStatCard("Patients", String(patients)),
-   makeStatCard("Doctors", String(doctors)),
-   makeStatCard("Pending Payments", String(pendingPayments)),
-   makeStatCard("Paid Deliveries", String(paidDeliveries))
+   makeStatCard("Patients", String(dashboard.patients)),
+   makeStatCard("Doctors", String(dashboard.doctors)),
+   makeStatCard("Pending Payments", String(dashboard.pendingPayments)),
+   makeStatCard("Paid Deliveries", String(dashboard.paidDeliveries))
  );
 
  const stats2 = createElement("div", "grid grid-4");
  appendChildren(stats2,
-   makeStatCard("Pharmacy Orders", String(pharmacyOrders)),
-   makeStatCard("Home Services", String(homeRequests)),
-   makeStatCard("Laboratory Requests", String(db.labRequests.length)),
-   makeStatCard("Revenue", money(revenue))
+   makeStatCard("Pharmacy Orders", String(dashboard.pharmacyOrders)),
+   makeStatCard("Home Services", String(dashboard.homeServices)),
+   makeStatCard("Laboratory Requests", String(dashboard.labRequests)),
+   makeStatCard("Revenue", money(dashboard.revenue))
  );
 
  const grid = createElement("div", "grid grid-2");
@@ -1281,15 +1317,19 @@ function renderAdminDashboard(){
  );
  table.appendChild(header);
 
- ["Consultation", "Pharmacy", "Delivery", "Home Service", "Laboratory"].forEach(type => {
-   const invoices = db.invoices.filter(i => i.type === type);
-   const paid = invoices.filter(i => i.status === "Paid");
-   const total = paid.reduce((sum, i) => sum + Number(i.total), 0);
+ [
+   ["Consultation", "consultation"],
+   ["Pharmacy", "medicine"],
+   ["Delivery", "delivery"],
+   ["Home Service", "homeAssessment"],
+   ["Laboratory", "lab"]
+ ].forEach(([type, kind]) => {
+   const financial = dashboard.financials[kind] || {paid:0,revenue:0};
    const row = document.createElement("tr");
    appendChildren(row,
      createElement("td", null, type),
-     createElement("td", null, String(paid.length)),
-     createElement("td", null, money(total))
+     createElement("td", null, String(financial.paid)),
+     createElement("td", null, money(financial.revenue))
    );
    table.appendChild(row);
  });
@@ -2348,7 +2388,7 @@ box.innerHTML=`
 `;
 }
 
-function createAppointment(e){
+async function createAppointment(e){
 
 e.preventDefault();
 
@@ -3343,7 +3383,7 @@ return`
 
         ${db.inventory.map(m=>`
 
-          <option value="${escapeHTML(m.name)}">
+          <option value="${escapeHTML(m.id)}">
             ${escapeHTML(m.name)}
           </option>
 
@@ -4090,7 +4130,7 @@ setTimeout(()=>{
 
 }
 
-function submitDemoPayment(
+async function submitDemoPayment(
 event,
 invoiceId
 ){
@@ -4131,6 +4171,23 @@ alert(
 
 return;
 
+}
+
+let paidViaApi=false;
+if(invoice.fromApi){
+  try{
+    const paid=await apiRequest(`/invoices/${encodeURIComponent(invoice.id)}/pay`,{
+      method:"POST",
+      body:JSON.stringify({phone:cleanPhone,method:"M-Pesa Paybill"})
+    });
+    paidViaApi=true;
+    invoice.status="Paid";
+    invoice.paidAt=new Date().toISOString();
+    invoice.transactionReference=paid.payment.reference;
+  }catch(error){
+    alert(error.message||"Unable to confirm payment.");
+    return;
+  }
 }
 
 invoice.status="Paid";
@@ -4180,7 +4237,7 @@ new Date().toISOString()
 
 });
 
-handlePaidInvoice(invoice);
+if(!paidViaApi) handlePaidInvoice(invoice);
 
 saveDB();
 
@@ -5635,7 +5692,35 @@ return R*c;
 INVOICES
 ========================================================= */
 
-function renderInvoices(){
+async function renderInvoices(){
+
+const content=document.getElementById("content");
+content.innerHTML='<h1 class="page-title">Invoices & Payments</h1><div class="card">Loading invoices...</div>';
+try{
+  const remote=await apiRequest("/invoices");
+  const remoteInvoices=remote.map(invoice=>({
+    ...invoice,
+    invoiceNumber:invoice.invoiceNumber||invoice.id,
+    type:invoice.type||({lab:"Laboratory",consultation:"Consultation",medicine:"Pharmacy",delivery:"Delivery",homeAssessment:"Home Assessment",homeService:"Home Service"}[invoice.kind]||invoice.kind),
+    total:invoice.total??invoice.amount,
+    labRequestId:invoice.labRequestId||(invoice.kind==="lab"?invoice.refId:undefined),
+    appointmentId:invoice.appointmentId||(invoice.kind==="consultation"?invoice.refId:undefined),
+    pharmacyOrderId:invoice.pharmacyOrderId||(invoice.kind==="medicine"?invoice.refId:undefined),
+    homeServiceId:invoice.homeServiceId||(["homeAssessment","homeService"].includes(invoice.kind)?invoice.refId:undefined),
+    status:invoice.status==="Unpaid"?"Pending":invoice.status,
+    items:invoice.items||[{description:invoice.description||invoice.kind||"Invoice"}],
+    fromApi:true
+  }));
+  const remoteIds=new Set(remoteInvoices.map(invoice=>invoice.id));
+  db.invoices=[
+    ...db.invoices.filter(invoice=>!remoteIds.has(invoice.id)),
+    ...remoteInvoices
+  ];
+  saveDB();
+}catch(error){
+  content.innerHTML=`<h1 class="page-title">Invoices & Payments</h1><div class="alert alert-danger">Unable to load invoices: ${escapeHTML(error.message||"Please try again.")} <button class="btn btn-secondary" onclick="renderInvoices()">Retry</button></div>`;
+  return;
+}
 
 const invoices=
 currentUser.role==="admin"
@@ -6981,7 +7066,7 @@ renderHomeServices();
 INVENTORY
 ========================================================= */
 
-function renderInventory(){
+async function renderInventory(){
 
 if(
 currentUser.role!=="pharmacist" &&
@@ -6990,9 +7075,17 @@ currentUser.role!=="admin"
 return;
 }
 
-document.getElementById(
-"content"
-).innerHTML=`
+const content=document.getElementById("content");
+content.innerHTML="<h1 class=\"page-title\">Pharmacy Inventory</h1><div class=\"card\">Loading pharmacy stock...</div>";
+let inventory;
+try{
+  inventory=await refreshInventory();
+}catch(error){
+  content.innerHTML=`<h1 class="page-title">Pharmacy Inventory</h1><div class="alert alert-danger">Unable to load pharmacy stock: ${escapeHTML(error.message||"Please try again.")} <button class="btn btn-secondary" onclick="renderInventory()">Retry</button></div>`;
+  return;
+}
+
+content.innerHTML=`
 
 
 <h1 class="page-title">
@@ -7000,8 +7093,7 @@ document.getElementById(
   Pharmacy Inventory
 
   ${
-    currentUser.role==="pharmacist" ||
-    currentUser.role==="admin"
+    currentUser.role==="pharmacist"
     ?
     `<button
        class="btn btn-primary"
@@ -7028,10 +7120,11 @@ document.getElementById(
         <th>Quantity</th>
         <th>Expiry</th>
         <th>Status</th>
+        <th>Action</th>
 
       </tr>
 
-      ${db.inventory.map(m=>`
+      ${inventory.map(m=>`
 
         <tr>
 
@@ -7068,6 +7161,12 @@ document.getElementById(
 
           </td>
 
+          <td>
+            ${currentUser.role==="pharmacist"
+              ? `<button class="btn btn-secondary" onclick="showEditMedicine('${m.id}')">Update Stock</button>`
+              : "-"}
+          </td>
+
         </tr>
 
       `).join("")}
@@ -7082,6 +7181,11 @@ document.getElementById(
 }
 
 function showAddMedicine(){
+
+if(currentUser.role!=="pharmacist"){
+  alert("Only a pharmacist can update pharmacy stock.");
+  return;
+}
 
 document.getElementById(
 "modalContent"
@@ -7160,46 +7264,85 @@ document.getElementById(
 openModal();
 }
 
-function addMedicine(e){
+function showEditMedicine(medicineId){
+  if(currentUser.role!=="pharmacist"){
+    alert("Only a pharmacist can update pharmacy stock.");
+    return;
+  }
+  const medicine=db.inventory.find(item=>item.id===medicineId);
+  if(!medicine)return;
+  document.getElementById("modalContent").innerHTML=`
+    <h2>Update Pharmacy Stock</h2>
+    <form onsubmit="updateMedicine(event,'${medicine.id}')">
+      <div class="form-group"><label>Medicine Name</label><input id="editMedicineName" class="form-control" value="${escapeHTML(medicine.name)}" required></div>
+      <div class="grid grid-3">
+        <div class="form-group"><label>Price</label><input id="editMedicinePrice" type="number" min="0" step="0.01" class="form-control" value="${Number(medicine.price)}" required></div>
+        <div class="form-group"><label>Quantity</label><input id="editMedicineQuantity" type="number" min="0" step="1" class="form-control" value="${Number(medicine.quantity)}" required></div>
+        <div class="form-group"><label>Expiry</label><input id="editMedicineExpiry" type="date" class="form-control" value="${escapeHTML(medicine.expiry)}" required></div>
+      </div>
+      <button class="btn btn-primary">Save Stock</button>
+      <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+    </form>`;
+  openModal();
+}
+
+async function updateMedicine(event,medicineId){
+  event.preventDefault();
+  if(currentUser.role!=="pharmacist"){
+    alert("Only a pharmacist can update pharmacy stock.");
+    return;
+  }
+  const submitButton=event.currentTarget.querySelector("button[type='submit'], button:not([type])");
+  if(submitButton)submitButton.disabled=true;
+  try{
+    const updated=await apiRequest(`/inventory/${encodeURIComponent(medicineId)}`,{
+      method:"PATCH",
+      body:JSON.stringify({
+        name:document.getElementById("editMedicineName").value.trim(),
+        price:Number(document.getElementById("editMedicinePrice").value),
+        quantity:Number(document.getElementById("editMedicineQuantity").value),
+        expiry:document.getElementById("editMedicineExpiry").value
+      })
+    });
+    const index=db.inventory.findIndex(item=>item.id===medicineId);
+    if(index>=0)db.inventory[index]=updated;
+    saveDB();
+    closeModal();
+    await renderInventory();
+  }catch(error){
+    alert(error.message||"Unable to update pharmacy stock.");
+  }finally{
+    if(submitButton)submitButton.disabled=false;
+  }
+}
+
+async function addMedicine(e){
 
 e.preventDefault();
 
-db.inventory.push({
-
-
-id:uid("medicine"),
-
-name:
-  document.getElementById(
-    "newMedicineName"
-  ).value,
-
-price:
-  Number(
-    document.getElementById(
-      "newMedicinePrice"
-    ).value
-  ),
-
-quantity:
-  Number(
-    document.getElementById(
-      "newMedicineQuantity"
-    ).value
-  ),
-
-expiry:
-  document.getElementById(
-    "newMedicineExpiry"
-  ).value
-
-});
-
-saveDB();
-
-closeModal();
-
-renderInventory();
+if(currentUser.role!=="pharmacist"){
+  alert("Only a pharmacist can update pharmacy stock.");
+  return;
+}
+const submitButton=e.currentTarget.querySelector("button[type='submit'], button:not([type])");
+if(submitButton) submitButton.disabled=true;
+try{
+  await apiRequest("/inventory",{
+    method:"POST",
+    body:JSON.stringify({
+      name:document.getElementById("newMedicineName").value.trim(),
+      price:Number(document.getElementById("newMedicinePrice").value),
+      quantity:Number(document.getElementById("newMedicineQuantity").value),
+      expiry:document.getElementById("newMedicineExpiry").value
+    })
+  });
+  closeModal();
+  await renderInventory();
+}catch(error){
+  alert(error.message||"Unable to add medicine to pharmacy stock.");
+}finally{
+  if(submitButton) submitButton.disabled=false;
+}
 }
 
 /* =========================================================
@@ -8569,7 +8712,7 @@ function updateConsultationFeeDisplay(){
   box.innerHTML=`<strong>Selected service:</strong> ${escapeHTML(item.name)}<br><strong>Fee:</strong> ${item.label}`;
 }
 
-function createAppointment(e){
+async function createAppointment(e){
   e.preventDefault();
   const doctorId=document.getElementById("bookDoctor").value,date=document.getElementById("bookDate").value,time=document.getElementById("bookTime").value,type=document.getElementById("bookType").value;
   const consultationServices=getActiveServices("Telemedicine / Consultation");
@@ -8585,14 +8728,43 @@ function createAppointment(e){
   if(apps.some(a=>overlap(start,end,timeToMinutes(a.time),timeToMinutes(a.endTime||addMinutesToTime(a.time,45))))){const next=findNextAvailable(doctorId,date,time);alert(`That time overlaps another appointment. ${next?`Next available start: ${next}.`:'No later slot is available today.'}`);return;}
   const patientConflict=db.appointments.find(a=>a.patientId===currentUser.id&&a.date===date&&a.status!=="Cancelled"&&overlap(start,end,timeToMinutes(a.time),timeToMinutes(a.endTime||addMinutesToTime(a.time,45))));
   if(patientConflict){alert("You already have another appointment during this time.");return;}
-  const appointment={id:uid("appointment"),patientId:currentUser.id,doctorId,specialty:doctor.specialty||"General Doctor",date,time,endTime:addMinutesToTime(time,45),durationMinutes:45,type,consultationService:consultationService.name,consultationFee:consultationService.price,reason:document.getElementById("bookReason")?.value||"",status:"Pending Payment",createdAt:new Date().toISOString()};
-  db.appointments.push(appointment);
-  const invoice={id:uid("invoice"),invoiceNumber:invoiceNumber(type==="Physical Hospital Visit"?"PHYS":"CONS"),type:"Consultation",appointmentId:appointment.id,patientId:currentUser.id,items:[{description:`${consultationService.name} — ${doctor.specialty||'General Doctor'}`,quantity:1,unitPrice:Number(consultationService.price)}],total:Number(consultationService.price),status:"Pending",paymentMethod:null,transactionReference:null,createdAt:new Date().toISOString()};
-  db.invoices.push(invoice);
-  notify(currentUser.id,`${type} booked for ${date} at ${time}. Please pay invoice ${invoice.invoiceNumber}.`);
-  notify(doctorId,`New ${type.toLowerCase()} booking request for ${date} at ${time}.`);
-  notifyAllAdmins(`NEW BOOKING: ${currentUser.name} booked ${type} for ${date} at ${time} with ${doctor.name}.`);
-  saveDB(); closeModal(); alert(`Appointment booked for ${date} at ${time}. Please complete payment.`); navigate("invoices");
+  const submitButton=e.currentTarget.querySelector("button[type='submit'], button:not([type])");
+  if(submitButton)submitButton.disabled=true;
+  try{
+    const created=await apiRequest("/appointments",{
+      method:"POST",
+      body:JSON.stringify({
+        doctorId,date,time,type,reason:document.getElementById("bookReason")?.value||"",
+        consultationService:consultationService.name,
+        consultationFee:Number(consultationService.price)
+      })
+    });
+    const appointment={
+      ...created.appointment,
+      specialty:doctor.specialty||"General Doctor",
+      durationMinutes:45
+    };
+    const invoice={
+      ...created.invoice,
+      invoiceNumber:created.invoice.id,
+      type:"Consultation",
+      appointmentId:appointment.id,
+      total:created.invoice.amount,
+      status:"Pending",
+      items:[{description:created.invoice.description,quantity:1,unitPrice:created.invoice.amount}],
+      fromApi:true
+    };
+    db.appointments.push(appointment);
+    db.invoices.push(invoice);
+    saveDB();
+    closeModal();
+    alert(`Appointment booked for ${date} at ${time}. Please complete payment.`);
+    navigate("invoices");
+  }catch(error){
+    alert(error.message||"Unable to book the appointment.");
+  }finally{
+    if(submitButton)submitButton.disabled=false;
+  }
 }
 
 function showRescheduleForm(id){
@@ -8621,7 +8793,13 @@ function renderLaboratory(){
 }
 
 /* NCD medicine refill: no consultation fee; only medicine and delivery invoices. */
-function showRefillForm(){
+async function showRefillForm(){
+  try{
+    await refreshInventory();
+  }catch(error){
+    alert(error.message||"Unable to load current pharmacy stock.");
+    return;
+  }
   const meds=db.inventory.filter(m=>m.quantity>0&&new Date(m.expiry)>=new Date());
   document.getElementById("modalContent").innerHTML=`<h2>💊 NCD Medicine Refill</h2><div class="alert alert-info">For ongoing NCD medicines. No consultation is required. You pay only for the medicine and delivery fee.</div><form onsubmit="createRefillRequest(event)"><div class="form-group"><label>Medicine</label><select id="refillMedicine" class="form-control" required>${meds.map(m=>`<option value="${m.id}">${escapeHTML(m.name)} — ${money(m.price)} each</option>`).join('')}</select></div><div class="form-group"><label>Quantity</label><input id="refillQty" type="number" min="1" value="1" class="form-control" required></div><div class="form-group"><label>Condition / Refill Note</label><textarea id="refillNote" class="form-control" placeholder="e.g. Diabetes / hypertension maintenance refill"></textarea></div><button class="btn btn-primary">Submit Refill Request</button><button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button></form>`;openModal();
 }
@@ -8697,7 +8875,16 @@ function syncPaidPharmacyOrders(){
   });
 }
 
-function renderPharmacy(){
+async function renderPharmacy(){
+  try{
+    await refreshPharmacyOrders();
+    if(currentUser.role==="pharmacist"||currentUser.role==="admin"||currentUser.role==="doctor"||currentUser.role==="patient"){
+      await refreshInventory();
+    }
+  }catch(error){
+    document.getElementById("content").innerHTML=`<h1 class="page-title">Pharmacy Orders</h1><div class="alert alert-danger">Unable to load pharmacy data: ${escapeHTML(error.message||"Please try again.")} <button class="btn btn-secondary" onclick="renderPharmacy()">Retry</button></div>`;
+    return;
+  }
   syncPaidPharmacyOrders();
   saveDB();
   const orders=currentUser.role==="patient"?db.pharmacyOrders.filter(o=>o.patientId===currentUser.id):db.pharmacyOrders;
@@ -9205,7 +9392,7 @@ __staff.forEach(s=>{
 function patientCanBookHomeDirectly(patientId){
   const patient=getUser(patientId);
   if(!patient || patient.role!=="patient") return false;
-  return getPatientStatus(patientId)==="Returning Client" || patient.homeAssessmentStatus==="approved";
+  return patient.homeServiceEligible===true || getPatientStatus(patientId)==="Returning Client" || patient.homeAssessmentStatus==="approved";
 }
 
 function homeAssessmentStatusLabel(patientId){
@@ -10684,7 +10871,14 @@ window.buildSidebar = function(){
 
 const prevRenderDashboard = window.renderDashboard;
 window.renderDashboard = function(){
-  if(currentUser && currentUser.role===ROLE_LAB){ renderLabDashboard(); return; }
+  if(currentUser && currentUser.role===ROLE_LAB){
+    refreshLabRequests()
+      .then(renderLabDashboard)
+      .catch(error=>{
+        $("content").innerHTML=`<div class="alert alert-danger">Unable to load laboratory records: ${esc(error.message||"Please try again.")}</div>`;
+      });
+    return;
+  }
   prevRenderDashboard();
 };
 
@@ -10904,6 +11098,10 @@ window.handlePaidInvoice = function(invoice){
 /* =========================================================
    LABORATORY TECHNICIAN
 ========================================================= */
+function formatLabResult(result){
+  if(result==null) return "";
+  return typeof result==="string" ? result : JSON.stringify(result,null,2);
+}
 function labInvoice(r){ return db.invoices.find(i=>i.id===r.invoiceId) || db.invoices.find(i=>i.labRequestId===r.id); }
 function labPaid(r){
   const inv = labInvoice(r);
@@ -10919,6 +11117,7 @@ function labRequestsFor(user){
   if(user.role===ROLE_LAB || user.role==="admin") return db.labRequests.slice();
   if(user.role==="patient") return db.labRequests.filter(l=>l.patientId===user.id);
   if(user.role==="doctor") return db.labRequests.filter(l=>l.requestedBy===user.id || (!l.requestedBy && getUser(l.patientId)?.role==="doctor"));
+  if(user.role==="nurse") return db.labRequests.slice();
   return [];
 }
 
@@ -10964,13 +11163,13 @@ function labTableHTML(requests, role){
     }
     action += ` <button class="btn btn-secondary" onclick="v8PrintLab('${r.id}')">🖨 Print</button>`;
     if(isStaff){
-      return `<tr data-stage="${st.key}" data-q="${esc(q)}"><td class="small">${esc(r.id.slice(-10))}</td><td>${esc(fmtDT(r.createdAt))}</td><td>${esc(p?.name||"-")}<div class="small text-muted">${esc(p?.phone||"")}</div></td>
-        <td>${esc(d?.name||"-")}</td><td>${esc(r.testName)}</td><td>${r.urgency==="Urgent"?`<span class="badge badge-danger">URGENT</span>`:`<span class="badge badge-dark">Routine</span>`}</td>
+      return `<tr data-stage="${st.key}" data-q="${esc(q)}"><td class="small">${esc(r.id.slice(-10))}</td><td>${esc(fmtDT(r.createdAt))}</td><td>${esc(p?.name||r.patientName||"-")}<div class="small text-muted">${esc(p?.phone||r.patientPhone||"")}</div></td>
+        <td>${esc(d?.name||r.requestedByName||"-")}</td><td>${esc(r.testName)}</td><td>${r.urgency==="Urgent"?`<span class="badge badge-danger">URGENT</span>`:`<span class="badge badge-dark">Routine</span>`}</td>
         <td class="small">${esc(r.notes||"-")}</td><td><span class="badge ${paid?"badge-success":"badge-warning"}">${paid?"Paid":"Unpaid"}</span></td>
         <td><span class="badge ${st.cls}">${st.label}</span></td><td>${action}</td></tr>`;
     }
     if(role==="doctor"){
-      return `<tr data-stage="${st.key}" data-q="${esc(q)}"><td class="small">${esc(r.id.slice(-10))}</td><td>${esc(fmtDT(r.createdAt))}</td><td>${esc(p?.name||"-")}</td><td>${esc(r.testName)}</td>
+      return `<tr data-stage="${st.key}" data-q="${esc(q)}"><td class="small">${esc(r.id.slice(-10))}</td><td>${esc(fmtDT(r.createdAt))}</td><td>${esc(p?.name||r.patientName||"-")}</td><td>${esc(r.testName)}</td>
         <td><span class="badge ${st.cls}">${st.label}</span></td><td>${r.result&&st.key==="completed"?"Available":"Pending"}</td><td>${action}</td></tr>`;
     }
     return `<tr data-stage="${st.key}" data-q="${esc(q)}"><td class="small">${esc(r.id.slice(-10))}</td><td>${esc(fmtDT(r.createdAt))}</td><td>${esc(r.testName)}</td>
@@ -10989,9 +11188,17 @@ function applyLabFilter(){
   });
 }
 
-window.renderLaboratory = function(){
+window.renderLaboratory = async function(){
   const role = currentUser.role;
-  const requests = labRequestsFor(currentUser);
+  $("content").innerHTML='<h1 class="page-title">Laboratory</h1><div class="card">Loading laboratory records...</div>';
+  let requests;
+  try{
+    await refreshLabRequests();
+    requests = labRequestsFor(currentUser);
+  }catch(error){
+    $("content").innerHTML=`<h1 class="page-title">Laboratory</h1><div class="alert alert-danger">Unable to load laboratory records: ${esc(error.message||"Please try again.")} <button class="btn btn-secondary" onclick="renderLaboratory()">Retry</button></div>`;
+    return;
+  }
   const counts = {all:requests.length, unpaid:0, ready:0, progress:0, completed:0};
   requests.forEach(r=>counts[labStage(r).key]++);
   const staff = role===ROLE_LAB || role==="admin";
@@ -11015,18 +11222,16 @@ window.renderLaboratory = function(){
 /* Doctor requests a test FOR a patient (the old form wrongly billed the doctor). */
 window.showLabForm = function(){
   if(currentUser.role!=="doctor"){ alert("Only doctors can request laboratory tests."); return; }
-  const patients = db.users.filter(u=>u.role==="patient" && u.enabled);
-  const mine = new Set(db.appointments.filter(a=>a.doctorId===currentUser.id).map(a=>a.patientId));
-  const opt = p=>`<option value="${p.id}">${esc(p.name)} — ${esc(p.phone||"")}</option>`;
   $("modalContent").innerHTML = `
     <h2>Request Laboratory Test</h2>
     <form onsubmit="createLabRequest(event)">
-      <div class="form-group"><label>Patient</label>
-        <select id="labPatient" class="form-control" required>
-          <option value="">Select patient</option>
-          ${patients.some(p=>mine.has(p.id)) ? `<optgroup label="My patients">${patients.filter(p=>mine.has(p.id)).map(opt).join("")}</optgroup>` : ""}
-          <optgroup label="${mine.size?"Other patients":"All patients"}">${patients.filter(p=>!mine.has(p.id)).map(opt).join("")}</optgroup>
-        </select></div>
+      <div class="form-group"><label for="labPatientSearch">Search for a patient</label>
+        <input id="labPatientSearch" type="search" class="form-control" placeholder="Enter patient name, phone, email or ID" autocomplete="off" oninput="searchLabPatients(this.value)" required>
+        <select id="labPatient" class="form-control" style="margin-top:8px" aria-label="Matching patients" required>
+          <option value="">Search for a patient to see matches</option>
+        </select>
+        <div id="labPatientSearchStatus" class="small text-muted" role="status" aria-live="polite">Enter at least 2 characters to search.</div>
+      </div>
       <div class="grid grid-2">
         <div class="form-group"><label>Laboratory Test</label>
           <select id="labTest" class="form-control" required><option value="">Select test</option>${LAB_TESTS.map(t=>`<option value="${esc(t.name)}">${esc(t.name)} — ${money(t.price)}</option>`).join("")}</select></div>
@@ -11040,19 +11245,87 @@ window.showLabForm = function(){
   openModal();
 };
 
-window.createLabRequest = function(e){
+let labPatientSearchTimer = null;
+let labPatientSearchRequest = 0;
+window.searchLabPatients = function(query){
+  const select = $("labPatient"), status = $("labPatientSearchStatus");
+  if(!select || !status) return;
+  clearTimeout(labPatientSearchTimer);
+  const requestId = ++labPatientSearchRequest;
+  const term = query.trim();
+  select.innerHTML = '<option value="">Search for a patient to see matches</option>';
+  if(term.length < 2){
+    status.textContent = "Enter at least 2 characters to search.";
+    return;
+  }
+  status.textContent = "Searching patients...";
+  labPatientSearchTimer = setTimeout(async()=>{
+    try{
+      const patients = await apiRequest(`/patients/search?q=${encodeURIComponent(term)}`);
+      if(requestId !== labPatientSearchRequest || $("labPatientSearch")?.value.trim() !== term) return;
+      select.innerHTML = patients.length
+        ? '<option value="">Select a patient</option>' + patients.map(patient=>
+            `<option value="${esc(patient.id)}">${esc(patient.name)}${patient.phone?` — ${esc(patient.phone)}`:""}</option>`
+          ).join("")
+        : '<option value="">No matching patients</option>';
+      status.textContent = patients.length
+        ? `Showing ${patients.length} match${patients.length===1?"":"es"} (maximum 25). Select one to continue.`
+        : "No patient matched that search.";
+    }catch(error){
+      if(requestId !== labPatientSearchRequest) return;
+      select.innerHTML = '<option value="">Unable to load patient matches</option>';
+      status.textContent = `Patient search failed: ${error.message||"Please try again."}`;
+    }
+  },250);
+};
+
+window.createLabRequest = async function(e){
   e.preventDefault();
   if(currentUser.role!=="doctor") return;
   const patientId = $("labPatient").value, testName = $("labTest").value;
-  const patient = getUser(patientId), test = LAB_TESTS.find(t=>t.name===testName);
+  let patient = getUser(patientId);
+  const test = LAB_TESTS.find(t=>t.name===testName);
+  if(patientId && (!patient || patient.role!=="patient")){
+    try{
+      const patients = await apiRequest(`/patients/search?q=${encodeURIComponent(patientId)}`);
+      patient = patients.find(item=>item.id===patientId);
+      if(patient) cacheBackendUser({...patient,role:"patient",enabled:true});
+    }catch(error){
+      alert(`Unable to verify the selected patient: ${error.message||"Please try again."}`);
+      return;
+    }
+  }
   if(!patient || !test){ alert("Please select a patient and a test."); return; }
   const urgency = $("labUrgency").value;
-  const request = {id:uid("lab"), patientId, requestedBy:currentUser.id, testName, notes:$("labNotes").value, urgency, status:"Requested", result:null, createdAt:new Date().toISOString()};
-  db.labRequests.push(request);
-  const invoice = {id:uid("invoice"), invoiceNumber:invoiceNumber("LAB"), type:"Laboratory", patientId, labRequestId:request.id,
-    items:[{description:testName, quantity:1, unitPrice:test.price}], total:test.price, status:"Pending", createdAt:new Date().toISOString()};
-  db.invoices.push(invoice); request.invoiceId = invoice.id;
-  db.users.filter(u=>u.role===ROLE_LAB && u.enabled).forEach(t=>notify(t.id, `${urgency==="Urgent"?"URGENT ":""}NEW LAB REQUEST: ${testName} for ${patient.name}, requested by ${currentUser.name}. Payment is pending.`, "lab"));
+  const submitButton=e.currentTarget.querySelector("button[type='submit'], button:not([type])");
+  if(submitButton) submitButton.disabled=true;
+  let request, invoice;
+  try{
+    const created=await apiRequest("/lab-requests",{
+      method:"POST",
+      body:JSON.stringify({patientId,testName,notes:$("labNotes").value,urgency})
+    });
+    request={
+      ...created.labRequest,
+      result:created.labRequest.results||null
+    };
+    invoice={
+      ...created.invoice,
+      invoiceNumber:created.invoice.id,
+      type:"Laboratory",
+      labRequestId:request.id,
+      total:created.invoice.amount,
+      status:created.invoice.status==="Paid"?"Paid":"Pending",
+      createdAt:created.invoice.createdAt
+    };
+    request.invoiceId=invoice.id;
+    db.labRequests.push(request);
+    db.invoices.push(invoice);
+  }catch(error){
+    alert(error.message||"Unable to save the laboratory request.");
+    if(submitButton) submitButton.disabled=false;
+    return;
+  }
   notify(patientId, `${currentUser.name} requested a laboratory test (${testName}). Please pay invoice ${invoice.invoiceNumber} so the lab can process it.`, "lab");
   notifyAllAdmins(`New laboratory request ${request.id}: ${testName} for ${patient.name}.`);
   saveDB(); closeModal();
@@ -11070,24 +11343,34 @@ window.processLab = function(requestId){
     <h2>Process Laboratory Request</h2>
     <div class="card" style="margin-bottom:14px">
       <p><strong>Test:</strong> ${esc(r.testName)} ${r.urgency==="Urgent"?`<span class="badge badge-danger">URGENT</span>`:""}</p>
-      <p><strong>Patient:</strong> ${esc(p?.name||"-")} (${esc(p?.phone||"-")})</p>
-      <p><strong>Requested by:</strong> ${esc(d?.name||"-")}</p>
+      <p><strong>Patient:</strong> ${esc(p?.name||r.patientName||"-")} (${esc(p?.phone||r.patientPhone||"-")})</p>
+      <p><strong>Requested by:</strong> ${esc(d?.name||r.requestedByName||"-")}</p>
       <p style="margin:0"><strong>Clinical notes:</strong> ${esc(r.notes||"-")}</p>
     </div>
     <div class="form-group"><label>Status</label>
       <select id="labStatus" class="form-control"><option ${r.status==="Processing"?"selected":""}>Processing</option><option>Completed</option></select></div>
-    <div class="form-group"><label>Result</label><textarea id="labResult" class="form-control" rows="7" placeholder="Enter findings, values and units…">${esc(r.result||"")}</textarea></div>
+    <div class="form-group"><label>Result</label><textarea id="labResult" class="form-control" rows="7" placeholder="Enter findings, values and units…">${esc(formatLabResult(r.result))}</textarea></div>
     <button class="btn btn-primary" onclick="saveLab('${r.id}')">Save</button>
     <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>`;
   openModal();
 };
 
-window.saveLab = function(requestId){
+window.saveLab = async function(requestId){
   if(currentUser.role!==ROLE_LAB) return;
   const r = db.labRequests.find(x=>x.id===requestId); if(!r) return;
   const status = $("labStatus").value, result = $("labResult").value.trim();
   if(status==="Completed" && !result){ alert("Please enter the result before marking the test as completed."); return; }
-  r.status = status; r.result = result || null; r.resultDate = new Date().toISOString();
+  try{
+    const updated=await apiRequest(`/lab-requests/${encodeURIComponent(requestId)}/results`,{
+      method:"POST",
+      body:JSON.stringify({status,result})
+    });
+    Object.assign(r,updated,{testName:updated.testName||r.testName,result:updated.result??updated.results??null});
+  }catch(error){
+    alert(error.message||"Unable to save laboratory results.");
+    return;
+  }
+  r.resultDate = status==="Completed" ? new Date().toISOString() : r.resultDate;
   r.processedBy = currentUser.id; r.processedByName = currentUser.name;
   const p = getUser(r.patientId);
   if(status==="Completed"){
@@ -11105,9 +11388,9 @@ window.viewLabResult = function(requestId){
   $("modalContent").innerHTML = `
     <h2>Laboratory Result</h2>
     <p><strong>${esc(r.testName)}</strong></p>
-    <p class="small text-muted">Patient: ${esc(p?.name||"-")} · Requested by: ${esc(d?.name||"-")}<br>
+    <p class="small text-muted">Patient: ${esc(p?.name||r.patientName||"-")} · Requested by: ${esc(d?.name||r.requestedByName||"-")}<br>
       ${r.resultDate?`Resulted: ${esc(fmtDT(r.resultDate))}`:""} ${r.processedByName?` · Lab: ${esc(r.processedByName)}`:""}</p>
-    <div class="card" style="white-space:pre-wrap">${esc(r.result||"No result available.")}</div>
+    <div class="card" style="white-space:pre-wrap">${esc(formatLabResult(r.result)||"No result available.")}</div>
     <button class="btn btn-primary" onclick="v8PrintLab('${r.id}')">🖨 Print</button>
     <button class="btn btn-secondary" onclick="closeModal()">Close</button>`;
   openModal();
@@ -11150,7 +11433,8 @@ function suggestSlots(date, time, patientId, excludeId, max){
   return out.sort((a,b)=>a.d-b.d).slice(0,max||4).map(x=>x.t).sort();
 }
 
-window.v8CheckSlot = function(){
+let bookingAvailabilityRequest = 0;
+window.v8CheckSlot = async function(){
   const box = $("bookAvail"); if(!box) return;
   const date = $("bookDate")?.value, time = $("bookTime")?.value;
   if(!date || !time){ box.className="alert alert-info"; box.textContent="Choose a date and start time to check availability."; return; }
@@ -11158,17 +11442,25 @@ window.v8CheckSlot = function(){
   const m = timeToMinutes(time);
   if(m<HOSPITAL_BOOKING_OPEN_MINUTES || m>HOSPITAL_BOOKING_CLOSE_MINUTES){ box.className="alert alert-warning"; box.textContent="Services run 8:00 AM to 5:00 PM."; return; }
   if(isPast(date,time)){ box.className="alert alert-warning"; box.textContent="That time has already passed. Please choose a future time."; return; }
-  syncBookings();
-  const n = freeDoctors(date,time).length;
-  if(n){
-    box.className = "alert alert-success";
-    box.innerHTML = `✅ A clinical provider is available for ${esc(time)}–${esc(addMinutesToTime(time,APPT_MINUTES))}. One will be assigned to you automatically.`;
-  }else{
-    const alt = suggestSlots(date,time,currentUser?.id,"",4);
-    box.className = "alert alert-warning";
-    box.innerHTML = `No provider is free at ${esc(time)}. ` + (alt.length
-      ? `Nearest available times: ${alt.map(t=>`<button type="button" class="v8-chip" onclick="v8UseTime('${t}')">${t}</button>`).join(" ")}`
-      : `Please try another date.`);
+  const requestId = ++bookingAvailabilityRequest;
+  box.className = "alert alert-info";
+  box.textContent = "Checking provider availability...";
+  try{
+    const availability = await apiRequest(`/doctors/availability?date=${encodeURIComponent(date)}&time=${encodeURIComponent(time)}`);
+    if(requestId !== bookingAvailabilityRequest || $("bookAvail") !== box) return;
+    if(availability.doctors.length){
+      box.className = "alert alert-success";
+      box.textContent = `A clinical provider is available for ${time}–${addMinutesToTime(time,APPT_MINUTES)}. One will be assigned automatically.`;
+    }else{
+      box.className = "alert alert-warning";
+      box.innerHTML = `No provider is free at ${esc(time)}. ` + (availability.suggestedTimes.length
+        ? `Nearest available times: ${availability.suggestedTimes.map(t=>`<button type="button" class="v8-chip" onclick="v8UseTime('${t}')">${t}</button>`).join(" ")}`
+        : `Please try another date.`);
+    }
+  }catch(error){
+    if(requestId !== bookingAvailabilityRequest || $("bookAvail") !== box) return;
+    box.className = "alert alert-danger";
+    box.textContent = `Unable to check provider availability: ${error.message||"Please retry."}`;
   }
 };
 window.v8UseTime = function(t){ const i = $("bookTime"); if(i){ i.value = t; v8CheckSlot(); } };
@@ -11207,7 +11499,7 @@ window.updateConsultationFeeDisplay = function(){
   box.innerHTML = `<strong>Selected service:</strong> ${esc(item.name)}<br><strong>Fee:</strong> ${esc(item.priceLabel||money(item.price))}`;
 };
 
-window.createAppointment = function(e){
+window.createAppointment = async function(e){
   e.preventDefault();
   if(currentUser.role!=="patient"){ alert("Only patients can book appointments."); return; }
   const type = $("bookType").value, date = $("bookDate").value, time = $("bookTime").value;
@@ -11215,29 +11507,57 @@ window.createAppointment = function(e){
   if(!date || !time || !svc){ alert("Please select the consultation/follow-up service, date and time."); return; }
   if(!validateHospitalBookingWindow(date,time,"appointment")) return;
   if(isPast(date,time)){ alert("Please choose a future date and time."); return; }
-  syncBookings();
-  if(patientIsBusy(currentUser.id,date,time)){ alert("You already have another appointment during this time."); return; }
-  const candidates = freeDoctors(date,time);
-  if(!candidates.length){
-    const alt = suggestSlots(date,time,currentUser.id,"",4);
-    alert(`No clinical provider is free at ${time} on ${date}.` + (alt.length ? ` Nearest available times: ${alt.join(", ")}.` : " Please try another date."));
-    v8CheckSlot(); return;
+  const submitButton = e.currentTarget.querySelector("button[type='submit'], button:not([type])");
+  if(submitButton) submitButton.disabled = true;
+  try{
+    const availability = await apiRequest(`/doctors/availability?date=${encodeURIComponent(date)}&time=${encodeURIComponent(time)}`);
+    if(!availability.doctors.length){
+      alert(`No clinical provider is free at ${time} on ${date}.` +
+        (availability.suggestedTimes.length ? ` Nearest available times: ${availability.suggestedTimes.join(", ")}.` : " Please try another date."));
+      v8CheckSlot();
+      return;
+    }
+    const doctor = availability.doctors[Math.floor(Math.random()*availability.doctors.length)];
+    const created = await apiRequest("/appointments", {
+      method:"POST",
+      body:JSON.stringify({
+        doctorId:doctor.id, date, time, type, reason:$("bookReason")?.value||"",
+        consultationService:svc.name, consultationFee:Number(svc.price)
+      })
+    });
+    const appointment = {
+      ...created.appointment,
+      specialty:doctor.specialty||"Clinical Provider",
+      durationMinutes:APPT_MINUTES,
+      autoAssigned:true
+    };
+    const invoice = {
+      ...created.invoice,
+      invoiceNumber:created.invoice.id,
+      type:"Consultation",
+      appointmentId:appointment.id,
+      total:created.invoice.amount,
+      status:"Pending",
+      items:[{description:created.invoice.description,quantity:1,unitPrice:created.invoice.amount}],
+      fromApi:true
+    };
+    db.appointments = [...db.appointments.filter(item=>item.id!==appointment.id),appointment];
+    db.invoices = [...db.invoices.filter(item=>item.id!==invoice.id),invoice];
+    const cachedDoctor = db.users.find(item=>item.id===doctor.id);
+    if(cachedDoctor) Object.assign(cachedDoctor,doctor);
+    else db.users.push({...doctor,role:"doctor",enabled:true});
+    saveDB();
+    closeModal();
+    alert(`Appointment booked for ${date} at ${time}.\nYour clinical provider: ${doctor.name}.\nPlease pay the invoice to confirm.`);
+    navigate("invoices");
+  }catch(error){
+    alert(error.message || (error.status===409
+      ? "Provider availability changed while booking. Please check the selected time and try again."
+      : "Unable to book the appointment."));
+    v8CheckSlot();
+  }finally{
+    if(submitButton) submitButton.disabled=false;
   }
-  const doctor = pickRandom(candidates);                       /* ← random assignment */
-  const appointment = {id:uid("appointment"), patientId:currentUser.id, doctorId:doctor.id, autoAssigned:true,
-    specialty:doctor.specialty||"Clinical Provider", date, time, endTime:addMinutesToTime(time,APPT_MINUTES), durationMinutes:APPT_MINUTES,
-    type, consultationService:svc.name, consultationFee:svc.price, reason:$("bookReason")?.value||"", status:"Pending Payment", createdAt:new Date().toISOString()};
-  db.appointments.push(appointment);
-  const invoice = {id:uid("invoice"), invoiceNumber:invoiceNumber(type==="Physical Hospital Visit"?"PHYS":"CONS"), type:"Consultation", appointmentId:appointment.id, patientId:currentUser.id,
-    items:[{description:`${svc.name} — ${doctor.specialty||"Clinical Provider"}`, quantity:1, unitPrice:Number(svc.price)}], total:Number(svc.price), status:"Pending", paymentMethod:null, transactionReference:null, createdAt:new Date().toISOString()};
-  db.invoices.push(invoice);
-  /* Everybody concerned is alerted immediately – the provider does not need to be logged in. */
-  notify(doctor.id, `NEW APPOINTMENT ASSIGNED TO YOU: ${currentUser.name} – ${type} on ${date} at ${time} (${svc.name}). Awaiting patient payment.`, "booking");
-  notify(currentUser.id, `${type} booked for ${date} at ${time} with ${doctor.name}. Please pay invoice ${invoice.invoiceNumber} to confirm.`, "booking");
-  notifyAllAdmins(`NEW BOOKING: ${currentUser.name} booked ${type} for ${date} at ${time}. Auto-assigned to ${doctor.name}.`);
-  saveDB(); closeModal();
-  alert(`Appointment booked for ${date} at ${time}.\nYour clinical provider: ${doctor.name}.\nPlease pay within 2 hours to confirm, or the slot is released.`);
-  navigate("invoices");
 };
 
 window.rescheduleAppointment = function(e,id){
@@ -11381,7 +11701,7 @@ function historyHTML(items){
 function labHistoryHTML(patientId){
   const done = db.labRequests.filter(r=>r.patientId===patientId && r.status==="Completed").sort((a,b)=>String(b.resultDate).localeCompare(String(a.resultDate))).slice(0,5);
   if(!done.length) return "";
-  return `<h4 style="margin-top:14px">Recent laboratory results</h4>` + done.map(r=>`<div class="v8-hist"><strong>${esc(r.testName)}</strong> <span class="small text-muted">${esc(fmtDT(r.resultDate))}</span><div style="white-space:pre-wrap">${esc(r.result||"")}</div></div>`).join("");
+  return `<h4 style="margin-top:14px">Recent laboratory results</h4>` + done.map(r=>`<div class="v8-hist"><strong>${esc(r.testName)}</strong> <span class="small text-muted">${esc(fmtDT(r.resultDate))}</span><div style="white-space:pre-wrap">${esc(formatLabResult(r.result))}</div></div>`).join("");
 }
 
 /* ---------- Patient Records (doctor) ---------- */
@@ -11501,8 +11821,28 @@ async function translateText(text,from,to){
 /* =========================================================
    CONSULTATION PAGE + ROOM
 ========================================================= */
-window.renderConsultation = function(){
-  const mine = db.appointments.filter(a=>(a.patientId===currentUser.id||a.doctorId===currentUser.id) && a.status==="Confirmed");
+window.renderConsultation = async function(){
+  $("content").innerHTML='<h1 class="page-title">Consultation</h1><div class="card">Loading consultations...</div>';
+  let mine;
+  try{
+    const [appointments,consultations]=await Promise.all([
+      apiRequest("/appointments"),
+      apiRequest("/consultations")
+    ]);
+    db.appointments=appointments;
+    db.consultations=consultations.map(consultation=>({
+      ...consultation,
+      clinicalNotes:consultation.clinicalNotes||consultation.notes||""
+    }));
+    saveDB();
+    mine=db.appointments.filter(a=>
+      (a.patientId===currentUser.id||a.doctorId===currentUser.id) &&
+      ["Confirmed","In Consultation"].includes(a.status)
+    );
+  }catch(error){
+    $("content").innerHTML=`<h1 class="page-title">Consultation</h1><div class="alert alert-danger">Unable to load consultations: ${esc(error.message||"Please try again.")} <button class="btn btn-secondary" onclick="renderConsultation()">Retry</button></div>`;
+    return;
+  }
   const isDoc = currentUser.role==="doctor";
   $("content").innerHTML = `
     <h1 class="page-title">Consultation</h1>
@@ -11551,10 +11891,23 @@ function updatePresence(S){
   el.innerHTML = on ? `<span class="v8-dot on"></span> ${esc(S.otherName)} is in the consultation` : `<span class="v8-dot"></span> Waiting for ${esc(S.otherName)} to join…`;
 }
 
-window.joinConsultation = function(appointmentId){
+window.joinConsultation = async function(appointmentId){
   const a = db.appointments.find(x=>x.id===appointmentId);
-  if(!a || a.status!=="Confirmed"){ alert("This consultation has not been confirmed."); return; }
+  if(!a || !["Confirmed","In Consultation"].includes(a.status)){ alert("This consultation has not been confirmed."); return; }
   if(a.patientId!==currentUser.id && a.doctorId!==currentUser.id){ alert("You are not a participant in this consultation."); return; }
+  if(currentUser.role==="doctor"&&a.status==="Confirmed"){
+    try{
+      const consultation=await apiRequest(`/appointments/${encodeURIComponent(a.id)}/start`,{method:"POST"});
+      Object.assign(getOrCreateConsult(a),consultation,{
+        clinicalNotes:consultation.clinicalNotes||consultation.notes||""
+      });
+      a.status="In Consultation";
+      saveDB();
+    }catch(error){
+      alert(error.message||"Unable to start this consultation.");
+      return;
+    }
+  }
   stopSession();
   const isDoctor = currentUser.role==="doctor";
   const other = getUser(isDoctor ? a.patientId : a.doctorId);
@@ -11816,18 +12169,40 @@ window.v8NotesChanged = function(){
   clearTimeout(S.noteTimer);
   S.noteTimer = setTimeout(()=>{
     if(V8.session!==S) return;
-    flushNotes(S,false);
-    const e = $("v8Saved"); if(e) e.textContent = "Auto-saved at "+fmtClock(new Date().toISOString());
+    const changed=flushNotes(S,false);
+    if(!changed)return;
+    apiRequest(`/consultations/${encodeURIComponent(S.apptId)}/notes`,{
+      method:"PUT",
+      body:JSON.stringify({
+        clinicalNotes:$("clinicalNotes")?.value||"",
+        diagnosis:$("clinicalDx")?.value||""
+      })
+    }).then(()=>{
+      const e = $("v8Saved"); if(e) e.textContent = "Auto-saved at "+fmtClock(new Date().toISOString());
+    }).catch(error=>{
+      const e = $("v8Saved"); if(e) e.textContent = `Database save failed: ${error.message||"Please retry."}`;
+      console.error("Unable to autosave consultation notes:",error);
+    });
   },1200);
 };
 window.saveClinicalNotes = function(appointmentId){
   const S = V8.session;
   if(currentUser.role!=="doctor" || !S || S.apptId!==appointmentId) return;
   flushNotes(S,true);
-  const e = $("v8Saved"); if(e) e.textContent = "Saved at "+fmtClock(new Date().toISOString())+" — added to the patient's record.";
+  apiRequest(`/consultations/${encodeURIComponent(appointmentId)}/notes`,{
+    method:"PUT",
+    body:JSON.stringify({
+      clinicalNotes:$("clinicalNotes")?.value||"",
+      diagnosis:$("clinicalDx")?.value||""
+    })
+  }).then(()=>{
+    const e = $("v8Saved"); if(e) e.textContent = "Saved at "+fmtClock(new Date().toISOString())+" — added to the patient's record.";
+  }).catch(error=>{
+    alert(error.message||"Unable to save consultation notes to the database.");
+  });
 };
 
-window.endConsultation = function(appointmentId, autoEnd){
+window.endConsultation = async function(appointmentId, autoEnd){
   const a = db.appointments.find(x=>x.id===appointmentId); if(!a) return;
   const S = V8.session;
   if(currentUser.role!=="doctor"){ closeModal(); return; }
@@ -11838,6 +12213,15 @@ window.endConsultation = function(appointmentId, autoEnd){
     minutes = Math.min(45, Math.max(1, Math.ceil((Date.now()-S.startedAt)/60000)));
   }
   const c = getOrCreateConsult(a);
+  try{
+    await apiRequest(`/appointments/${encodeURIComponent(appointmentId)}/end`,{
+      method:"POST",
+      body:JSON.stringify({clinicalNotes:c.clinicalNotes||"",diagnosis:c.diagnosis||""})
+    });
+  }catch(error){
+    alert(error.message||"Unable to save the consultation to the database.");
+    return;
+  }
   c.status = "Completed"; c.endedAt = new Date().toISOString(); c.durationMinutes = minutes; c.updatedAt = c.endedAt;
   a.status = "Completed";
   saveDB();
@@ -12020,7 +12404,7 @@ window.v8PrintLab = function(id){
     <h3>Patient</h3>${patientBlock(p)}
     <h3>Test requested</h3><table><tr><th>Test</th></tr><tr><td>${esc(r.testName)}</td></tr></table>
     <h3>Clinical indication / notes</h3><div class="box">${esc(r.notes||"-")}</div>
-    ${done?`<h3>Result</h3><div class="box">${esc(r.result)}</div><table class="kv"><tr><td>Resulted</td><td>${esc(fmtDT(r.resultDate))}</td></tr><tr><td>Processed by</td><td>${esc(r.processedByName||"-")}</td></tr></table>`:""}
+    ${done?`<h3>Result</h3><div class="box">${esc(formatLabResult(r.result))}</div><table class="kv"><tr><td>Resulted</td><td>${esc(fmtDT(r.resultDate))}</td></tr><tr><td>Processed by</td><td>${esc(r.processedByName||"-")}</td></tr></table>`:""}
     <div class="sig"><div>Requested by: ${esc(d?.name||"-")}${d?.specialty?" ("+esc(d.specialty)+")":""}<br>Signature / stamp</div><div>${done?"Laboratory technician: "+esc(r.processedByName||""):"Received by laboratory"}<br>Signature / stamp</div></div>`);
 };
 
@@ -12064,12 +12448,12 @@ window.renderPrescriptions = function(){
 const prevRenderPharmacy = window.renderPharmacy;
 window.renderPharmacy = function(){
   prevRenderPharmacy();
-  if(currentUser.role!=="patient" && currentUser.role!=="pharmacist") return;
-  const list = db.prescriptions.filter(p=>currentUser.role==="pharmacist" || p.patientId===currentUser.id).slice().reverse();
+  if(currentUser.role!=="pharmacist") return;
+  const list = db.prescriptions.slice().reverse();
   if(!list.length) return;
   $("content").insertAdjacentHTML("beforeend", `<div class="card"><h3>Prescriptions</h3><div class="table-wrap"><table>
-    <thead><tr><th>Date</th>${currentUser.role==="pharmacist"?"<th>Patient</th>":""}<th>Doctor</th><th>Medicines</th><th></th></tr></thead><tbody>
-    ${list.map(p=>`<tr><td>${esc(fmtDT(p.createdAt))}</td>${currentUser.role==="pharmacist"?`<td>${esc(getUser(p.patientId)?.name||"-")}</td>`:""}<td>${esc(getUser(p.doctorId)?.name||"-")}</td>
+    <thead><tr><th>Date</th><th>Patient</th><th>Doctor</th><th>Medicines</th><th></th></tr></thead><tbody>
+    ${list.map(p=>`<tr><td>${esc(fmtDT(p.createdAt))}</td><td>${esc(getUser(p.patientId)?.name||"-")}</td><td>${esc(getUser(p.doctorId)?.name||"-")}</td>
       <td>${(p.items||[]).map(i=>esc(i.medicineName)).join(", ")}</td><td><button class="btn btn-secondary" onclick="v8PrintRx('${p.id}')">🖨 Print</button></td></tr>`).join("")}
     </tbody></table></div></div>`);
 };
@@ -12084,6 +12468,504 @@ window.createPrescription = function(e){
     pushActionToast("Prescription sent to the pharmacy.", "🖨 Print prescription", ()=>v8PrintRx(rx.id));
   }
 };
+
+function apiInvoiceToLocal(invoice){
+  if(!invoice) return null;
+  const kinds={lab:"Laboratory",consultation:"Consultation",medicine:"Pharmacy",delivery:"Delivery",
+    homeAssessment:"Home Assessment",homeService:"Home Service"};
+  const deliveryOrderId=invoice.kind==="delivery"?invoice.refId:undefined;
+  const linkedDelivery=deliveryOrderId?db.deliveries.find(item=>(item.pharmacyOrderId||item.orderId)===deliveryOrderId):null;
+  return {...invoice, invoiceNumber:invoice.invoiceNumber||invoice.id,
+    type:invoice.type||kinds[invoice.kind]||invoice.kind, total:invoice.total??invoice.amount,
+    homeServiceId:invoice.homeServiceId||(["homeAssessment","homeService"].includes(invoice.kind)?invoice.refId:undefined),
+    pharmacyOrderId:invoice.pharmacyOrderId||(invoice.kind==="delivery"?invoice.refId:undefined)||(invoice.kind==="medicine"?invoice.refId:undefined),
+    deliveryId:invoice.deliveryId||linkedDelivery?.id,
+    status:invoice.status==="Unpaid"?"Pending":invoice.status,
+    items:invoice.items||[{description:invoice.description||invoice.kind||"Invoice"}], fromApi:true};
+}
+
+function linkBackendDeliveryInvoices(){
+  db.invoices.filter(invoice=>invoice.kind==="delivery"||invoice.type==="Delivery").forEach(invoice=>{
+    const orderId=invoice.refId||invoice.pharmacyOrderId;
+    const delivery=db.deliveries.find(item=>(item.pharmacyOrderId||item.orderId)===orderId);
+    if(delivery){
+      invoice.deliveryId=delivery.id;
+      invoice.pharmacyOrderId=orderId;
+      delivery.deliveryInvoiceId=invoice.id;
+      delivery.deliveryPaymentStatus=invoice.status==="Paid"?"Paid":"Pending";
+    }
+  });
+}
+
+async function refreshBackendInvoices(){
+  if(!["patient","admin","pharmacist"].includes(currentUser?.role)) return [];
+  const remote=(await apiRequest("/invoices")).map(apiInvoiceToLocal);
+  const remoteIds=new Set(remote.map(invoice=>invoice.id));
+  db.invoices=[...db.invoices.filter(invoice=>!remoteIds.has(invoice.id)),...remote];
+  linkBackendDeliveryInvoices();
+  saveDB();
+  return remote;
+}
+
+async function refreshBackendPrescriptions(){
+  if(!["patient","doctor","pharmacist","admin"].includes(currentUser?.role)) return [];
+  const rows=await apiRequest("/prescriptions");
+  const remote=rows.map(row=>({...row,fromApi:true,items:(row.items||[]).map(item=>({
+    ...item,medicineName:item.medicineName||item.name||getUser(item.medicineId)?.name||"Medicine"
+  }))}));
+  const remoteIds=new Set(remote.map(row=>row.id));
+  db.prescriptions=[...db.prescriptions.filter(row=>!remoteIds.has(row.id)),...remote];
+  saveDB();
+  return remote;
+}
+
+async function refreshBackendDeliveries(){
+  if(!["patient","pharmacist","rider","admin"].includes(currentUser?.role)) return [];
+  const rows=await apiRequest("/deliveries");
+  const remote=rows.map(row=>({...row, pharmacyOrderId:row.pharmacyOrderId||row.orderId,
+    deliveryLocation:row.deliveryLocation||row.deliveryAddress||"", fromApi:true}));
+  const remoteIds=new Set(remote.map(delivery=>delivery.id));
+  db.deliveries=[...db.deliveries.filter(delivery=>!remoteIds.has(delivery.id)),...remote];
+  linkBackendDeliveryInvoices();
+  saveDB();
+  return remote;
+}
+
+function rememberHomeServiceUsers(row){
+  if(row.patientId && row.patientName && !getUser(row.patientId)){
+    db.users.push({id:row.patientId,name:row.patientName,phone:row.patientPhone||"",address:row.patientAddress||"",role:"patient"});
+  }
+  const nurseId=row.providerId||row.nurseId;
+  if(nurseId && row.nurseName && !getUser(nurseId)){
+    db.users.push({id:nurseId,name:row.nurseName,role:"nurse",enabled:true,homeServiceProvider:true});
+  }
+}
+
+async function refreshHomeServiceData(){
+  const rows=await apiRequest("/home-services");
+  db.homeServices=rows.map(row=>({...row,fromApi:true,
+    requestType:row.requestType||"service", service:row.service||row.serviceName||"Home Service",
+    date:row.date||row.preferredDate||"", time:row.time||row.preferredTime||"",
+    providerId:row.providerId||row.nurseId}));
+  db.homeServices.forEach(rememberHomeServiceUsers);
+  if(currentUser?.role==="patient"){
+    const eligibility=await apiRequest("/home-services/eligibility");
+    const patient=getUser(currentUser.id);
+    if(patient){
+      patient.homeServiceEligible=eligibility.canBookDirectly===true;
+      patient.homeAssessmentStatus=eligibility.homeAssessmentStatus||patient.homeAssessmentStatus;
+    }
+  }
+  const providers=await apiRequest("/home-services/providers");
+  providers.forEach(provider=>{
+    const existing=getUser(provider.id);
+    if(existing) Object.assign(existing,provider);
+    else db.users.push(provider);
+  });
+  saveDB();
+  return db.homeServices;
+}
+
+function mergeHomeServiceInvoice(invoice){
+  const local=apiInvoiceToLocal(invoice);
+  if(!local) return null;
+  db.invoices=db.invoices.filter(item=>item.id!==local.id);
+  db.invoices.push(local);
+  return local;
+}
+
+async function syncHomeServiceCatalog(){
+  const catalog=await apiRequest("/catalog");
+  HOME_SERVICES=(catalog.homeServices||[]).map(item=>({...item,active:item.active!==false}));
+  db.settings.homeServiceCatalog=HOME_SERVICES;
+  if(catalog.settings?.homeAssessmentFee!=null) db.settings.homeAssessmentFee=catalog.settings.homeAssessmentFee;
+  return HOME_SERVICES;
+}
+
+renderHomeServices=async function(){
+  const content=document.getElementById("content");
+  content.innerHTML='<h1 class="page-title">Home Healthcare Services</h1><div class="card">Loading home-service requests...</div>';
+  try{
+    await Promise.all([refreshHomeServiceData(),syncHomeServiceCatalog()]);
+  }catch(error){
+    content.innerHTML=`<h1 class="page-title">Home Healthcare Services</h1><div class="alert alert-danger">Unable to load home services: ${escapeHTML(error.message||"Please try again.")} <button class="btn btn-secondary" onclick="renderHomeServices()">Retry</button></div>`;
+    return;
+  }
+  const patient=currentUser.role==="patient"?getUser(currentUser.id):null;
+  const directAccess=!!patientCanBookHomeDirectly(currentUser.id);
+  const patientStatus=patient?.homeServiceEligible?"Returning Client":"New Client";
+  const rows=db.homeServices;
+  content.innerHTML=`
+    <h1 class="page-title">Home Healthcare Services
+      ${currentUser.role==="patient"?(directAccess
+        ?`<button class="btn btn-primary" onclick="showHomeServiceForm()">+ Request Home Service</button>`
+        :`<button class="btn btn-primary" onclick="showHomeAssessmentForm()">+ Request Home Assessment</button>`):""}
+    </h1>
+    ${currentUser.role==="patient"?`<div class="alert ${directAccess?"alert-success":"alert-warning"}">
+      <strong>Client status:</strong> ${escapeHTML(patientStatus)}
+      ${patient?.homeAssessmentStatus?`<br><strong>Home assessment:</strong> ${escapeHTML(homeAssessmentStatusLabel(currentUser.id))}`:""}
+      <br><br>${directAccess?"You may request an eligible home service directly.":"A Home Assessment is required before treatment at home can be requested. Pay the assessment fee first; the Nursing Officer will determine whether home care is appropriate."}
+    </div>`:`<div class="alert alert-info">Home-service requests and assessment outcomes are loaded from the database.</div>`}
+    ${currentUser.role==="admin"?renderAdminHomeServiceCatalogHtml():""}
+    <div class="card"><h3>${currentUser.role==="patient"?"My Home Service Requests":currentUser.role==="nurse"?"Assigned Home Services & Assessments":"Home Service Requests"}</h3>
+      <div class="table-wrap"><table><thead><tr><th>Request</th><th>Patient</th><th>Service</th><th>Date</th><th>Time</th><th>Phone</th><th>Location</th><th>Status</th><th>Action</th></tr></thead><tbody>
+      ${rows.length?rows.map(row=>{
+        const person=getUser(row.patientId), status=String(row.status||"-");
+        const assessment=row.requestType==="assessment";
+        const ready=["Paid - Awaiting Assignment","Assigned"].includes(status);
+        const action=currentUser.role==="nurse"&&assessment&&ready
+          ?`<button class="btn btn-primary" onclick="manageHomeAssessment('${row.id}')">Assess</button>`
+          :currentUser.role==="nurse"&&!assessment&&ready
+            ?`<button class="btn btn-primary" onclick="assignHomeService('${row.id}')">Manage</button>`
+            :currentUser.role==="admin"&&ready
+              ?`<button class="btn btn-primary" onclick="assignHomeService('${row.id}')">Manage</button>`
+              :currentUser.role==="nurse"||currentUser.role==="admin"?`<span class="small text-muted">Awaiting payment</span>`:"";
+        return `<tr><td>${escapeHTML(row.id)}</td><td>${escapeHTML(person?.name||row.patientName||"-")}</td>
+          <td>${escapeHTML(row.service||"-")}</td><td>${escapeHTML(row.date||"-")}</td><td>${escapeHTML(row.time||"-")}</td>
+          <td>${escapeHTML(person?.phone||row.patientPhone||"-")}</td><td>${escapeHTML(row.address||person?.address||"-")}</td>
+          <td><span class="badge ${status==="Completed"?"badge-success":status==="Not Suitable"?"badge-danger":status.includes("Paid")?"badge-info":"badge-warning"}">${escapeHTML(status)}</span></td><td>${action}</td></tr>`;
+      }).join(""):`<tr><td colspan="9"><div class="empty">No home-service requests.</div></td></tr>`}
+      </tbody></table></div>
+    </div>`;
+};
+window.renderHomeServices=renderHomeServices;
+
+window.createHomeService=async function(event){
+  event.preventDefault();
+  const name=document.getElementById("homeService")?.value||"";
+  const service=HOME_SERVICES.find(item=>item.name===name&&item.active!==false);
+  const date=document.getElementById("homeDate")?.value||"", time=document.getElementById("homeTime")?.value||"";
+  const providerId=document.getElementById("homeProvider")?.value||"";
+  const address=(document.getElementById("homeAddress")?.value||"").trim();
+  const transport=document.getElementById("homeTransport")?.value||"0";
+  const transportFee=transport==="quotation"?0:Number(transport);
+  if(!service||!providerId||!address||!validateHospitalBookingWindow(date,time,"home service")){
+    if(!service||!providerId||!address) alert("Please complete all home-service details.");
+    return;
+  }
+  const button=event.currentTarget.querySelector("button[type='submit'],button:not([type])");
+  if(button) button.disabled=true;
+  try{
+    const result=await apiRequest("/home-services",{method:"POST",body:JSON.stringify({
+      requestType:"service",serviceId:service.id,date,time,providerId,address,
+      notes:document.getElementById("homeNotes")?.value||"",transportFee,transportBand:transport,
+      transportQuotation:transport==="quotation"
+    })});
+    db.homeServices.unshift({...result.homeService,fromApi:true});
+    mergeHomeServiceInvoice(result.invoice);
+    rememberHomeServiceUsers(result.homeService);
+    saveDB(); closeModal(); alert("Home service request created. Please pay the invoice."); navigate("invoices");
+  }catch(error){
+    alert(error.message||"Unable to create the home-service request.");
+    if(button) button.disabled=false;
+  }
+};
+
+window.createHomeAssessment=async function(event){
+  event.preventDefault();
+  const date=document.getElementById("assessmentDate")?.value||"", time=document.getElementById("assessmentTime")?.value||"";
+  const providerId=document.getElementById("assessmentProvider")?.value||"";
+  const address=(document.getElementById("assessmentAddress")?.value||"").trim();
+  const notes=(document.getElementById("assessmentReason")?.value||"").trim();
+  if(!validateHospitalBookingWindow(date,time,"home assessment")) return;
+  if(!providerId||!address||!notes){alert("Please complete all assessment details.");return;}
+  const button=event.currentTarget.querySelector("button[type='submit'],button:not([type])");
+  if(button) button.disabled=true;
+  try{
+    const result=await apiRequest("/home-services",{method:"POST",body:JSON.stringify({
+      requestType:"assessment",date,time,providerId,address,notes
+    })});
+    db.homeServices.unshift({...result.homeService,fromApi:true});
+    mergeHomeServiceInvoice(result.invoice);
+    const patient=getUser(currentUser.id);
+    if(patient) patient.homeAssessmentStatus="paid_pending";
+    saveDB(); closeModal(); alert("Home Assessment request created. Please pay the assessment invoice."); navigate("invoices");
+  }catch(error){
+    alert(error.message||"Unable to create the home assessment.");
+    if(button) button.disabled=false;
+  }
+};
+
+window.saveHomeAssessmentOutcome=async function(id){
+  if(currentUser?.role!=="nurse") return;
+  const notes=(document.getElementById("assessmentClinicalNotes")?.value||"").trim();
+  const outcome=document.getElementById("assessmentOutcome")?.value;
+  if(!notes){alert("Please enter the assessment notes.");return;}
+  try{
+    const updated=await apiRequest(`/home-services/${encodeURIComponent(id)}/complete`,{
+      method:"POST",body:JSON.stringify({outcome,notes})
+    });
+    Object.assign(db.homeServices.find(row=>row.id===id)||{},updated);
+    await refreshHomeServiceData(); closeModal(); renderHomeServices();
+  }catch(error){alert(error.message||"Unable to save the assessment outcome.");}
+};
+window.manageHomeAssessment=manageHomeAssessment;
+
+window.assignHomeService=async function(id){
+  const service=db.homeServices.find(row=>row.id===id);
+  if(!service) return;
+  if(currentUser?.role==="admin"){
+    const nurses=db.users.filter(user=>user.role==="nurse"&&user.enabled!==false);
+    if(!nurses.length){alert("No enabled nursing officers are available.");return;}
+    document.getElementById("modalContent").innerHTML=`<h2>Assign Home Service</h2>
+      <p><strong>${escapeHTML(service.service||"Home Service")}</strong> — ${escapeHTML(service.date||"")} ${escapeHTML(service.time||"")}</p>
+      <div class="form-group"><label>Nursing Officer</label><select id="homeAssignmentNurse" class="form-control">${nurses.map(n=>`<option value="${n.id}" ${n.id===service.providerId?"selected":""}>${escapeHTML(n.name)}</option>`).join("")}</select></div>
+      <button class="btn btn-primary" onclick="saveBackendHomeAssignment('${id}')">Assign</button>
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>`;
+    openModal(); return;
+  }
+  if(currentUser?.role!=="nurse"||service.requestType==="assessment") return;
+  document.getElementById("modalContent").innerHTML=`<h2>Complete Home Visit</h2>
+    <p><strong>Patient:</strong> ${escapeHTML(service.patientName||getUser(service.patientId)?.name||"-")}</p>
+    <div class="form-group"><label>Visit Notes</label><textarea id="homeVisitNotes" class="form-control" rows="5" required></textarea></div>
+    <button class="btn btn-primary" onclick="completeBackendHomeVisit('${id}')">Save Visit Notes</button>
+    <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>`;
+  openModal();
+};
+window.saveBackendHomeAssignment=async function(id){
+  const nurseId=document.getElementById("homeAssignmentNurse")?.value;
+  try{
+    const updated=await apiRequest(`/home-services/${encodeURIComponent(id)}/assign`,{
+      method:"POST",body:JSON.stringify({nurseId})
+    });
+    Object.assign(db.homeServices.find(row=>row.id===id)||{},updated);
+    await refreshHomeServiceData(); closeModal(); renderHomeServices();
+  }catch(error){alert(error.message||"Unable to assign the home visit.");}
+};
+window.completeBackendHomeVisit=async function(id){
+  const notes=(document.getElementById("homeVisitNotes")?.value||"").trim();
+  if(!notes){alert("Please enter visit notes.");return;}
+  try{
+    await apiRequest(`/home-services/${encodeURIComponent(id)}/complete`,{method:"POST",body:JSON.stringify({notes})});
+    await refreshHomeServiceData(); closeModal(); renderHomeServices();
+  }catch(error){alert(error.message||"Unable to save the home visit.");}
+};
+
+window.saveHomeServiceCatalog=async function(event,serviceId=""){
+  event.preventDefault();
+  const name=document.getElementById("catalogName")?.value.trim();
+  const description=document.getElementById("catalogDescription")?.value.trim();
+  const price=Number(document.getElementById("catalogPrice")?.value);
+  if(!name||!description||!Number.isFinite(price)||price<0){alert("Please enter a valid service name, description and charge.");return;}
+  try{
+    const path=serviceId?`/home-services/catalog/${encodeURIComponent(serviceId)}`:"/home-services/catalog";
+    const saved=await apiRequest(path,{method:serviceId?"PATCH":"POST",body:JSON.stringify({name,description,price,active:true})});
+    if(serviceId) HOME_SERVICES=HOME_SERVICES.map(item=>item.id===serviceId?{...item,...saved}:item);
+    else HOME_SERVICES.push(saved);
+    db.settings.homeServiceCatalog=HOME_SERVICES; saveDB(); closeModal(); renderHomeServices();
+  }catch(error){alert(error.message||"Unable to save the home-service catalog entry.");}
+};
+window.toggleHomeServiceCatalog=async function(serviceId){
+  const service=HOME_SERVICES.find(item=>item.id===serviceId);
+  if(!service) return;
+  const active=service.active===false;
+  if(!active&&!confirm(`Remove "${service.name}" from the client service list? Existing requests will remain unchanged.`)) return;
+  try{
+    const updated=await apiRequest(`/home-services/catalog/${encodeURIComponent(serviceId)}`,{
+      method:"PATCH",body:JSON.stringify({active})
+    });
+    HOME_SERVICES=HOME_SERVICES.map(item=>item.id===serviceId?{...item,...updated}:item);
+    db.settings.homeServiceCatalog=HOME_SERVICES; saveDB(); renderHomeServices();
+  }catch(error){alert(error.message||"Unable to update the home-service catalog.");}
+};
+
+window.generateReport=async function(){
+  const from=document.getElementById("reportFrom")?.value||"";
+  const to=document.getElementById("reportTo")?.value||"";
+  const type=document.getElementById("reportType")?.value||"";
+  const box=document.getElementById("reportOutput");
+  if(!box) return;
+  box.innerHTML='<div class="card">Generating report...</div>';
+  const query=new URLSearchParams({type});
+  if(from) query.set("from",from);
+  if(to) query.set("to",to);
+  try{
+    const data=await apiRequest(`/admin/report/data?${query.toString()}`);
+    const definitions={
+      financial:{title:"Financial Summary",columns:["Invoice","Type","Patient","Total (KES)","Status","Created"],
+        rows:data.map(r=>[r.id,r.type,r.patient,r.total,r.status,r.createdAt?new Date(r.createdAt).toLocaleString():"-"])},
+      appointments:{title:"Appointments",columns:["Date","Time","Patient","Doctor","Specialty","Type","Status"],
+        rows:data.map(r=>[r.date,r.time,r.patient,r.doctor,r.specialty,r.type,r.status])},
+      pharmacy:{title:"Pharmacy Orders",columns:["Order","Patient","Type","Medicines","Status","Created"],
+        rows:data.map(r=>[r.id,r.patient,r.type,r.medicines,r.status,r.createdAt?new Date(r.createdAt).toLocaleString():"-"])},
+      deliveries:{title:"Deliveries",columns:["Delivery","Order","Patient","Rider","Location","Receiver Phone","Fee (KES)","Status","Created"],
+        rows:data.map(r=>[r.id,r.order,r.patient,r.rider,r.location||"-",r.receiverPhone||"-",r.fee,r.status,r.createdAt?new Date(r.createdAt).toLocaleString():"-"])},
+      "home-services":{title:"Home Services",columns:["Request","Patient","Service","Date","Total (KES)","Status"],
+        rows:data.map(r=>[r.id,r.patient,r.service,r.date,r.total,r.status])},
+      laboratory:{title:"Laboratory Requests",columns:["Request","Patient","Test","Status","Created"],
+        rows:data.map(r=>[r.id,r.patient,r.test,r.status,r.createdAt?new Date(r.createdAt).toLocaleString():"-"])},
+      users:{title:"Users",columns:["Name","Email","Role","Specialty","Status"],
+        rows:data.map(r=>[r.name,r.email,formatRole(r.role),r.specialty,r.status])}
+    };
+    const report=definitions[type];
+    if(!report) throw new Error("Unknown report type.");
+    window.__lastReport=report;
+    const paid=report.rows.filter(row=>row[4]==="Paid");
+    const summary=type==="financial"
+      ?`<div class="alert alert-success"><strong>Total paid in range:</strong> ${money(paid.reduce((sum,row)=>sum+Number(row[3]||0),0))} across ${paid.length} paid invoice(s).</div>`:"";
+    box.innerHTML=`<div class="card"><div class="page-title"><h3>${escapeHTML(report.title)} (${report.rows.length} record${report.rows.length===1?"":"s"})</h3><button class="btn btn-secondary" onclick="downloadReportCSV()">⬇️ Download CSV</button></div>${summary}${report.rows.length?`<div class="table-wrap"><table><tr>${report.columns.map(c=>`<th>${escapeHTML(c)}</th>`).join("")}</tr>${report.rows.map(row=>`<tr>${row.map(value=>`<td>${escapeHTML(String(value??""))}</td>`).join("")}</tr>`).join("")}</table></div>`:`<div class="empty">No records found for this range.</div>`}</div>`;
+  }catch(error){
+    box.innerHTML=`<div class="alert alert-danger">Unable to generate report: ${escapeHTML(error.message||"Please try again.")} <button class="btn btn-secondary" onclick="generateReport()">Retry</button></div>`;
+  }
+};
+generateReport=window.generateReport;
+
+window.createPrescription=async function(event){
+  event.preventDefault();
+  if(currentUser?.role!=="doctor") return;
+  const patientId=document.getElementById("prescriptionPatient")?.value;
+  const appointmentId=document.getElementById("prescriptionAppointment")?.value||null;
+  const items=[...document.querySelectorAll(".prescription-item")].map(item=>({
+    medicineId:item.querySelector(".med-name")?.value,
+    quantity:Number(item.querySelector(".med-quantity")?.value),
+    dosage:item.querySelector(".med-dosage")?.value||"",
+    frequency:item.querySelector(".med-frequency")?.value||"",
+    duration:item.querySelector(".med-duration")?.value||""
+  }));
+  if(!patientId||!items.length||items.some(item=>!item.medicineId||!Number.isInteger(item.quantity)||item.quantity<1)){
+    alert("Choose a patient and enter valid medicine quantities."); return;
+  }
+  const button=event.currentTarget.querySelector("button[type='submit'],button:not([type])");
+  if(button) button.disabled=true;
+  try{
+    const result=await apiRequest("/prescriptions",{method:"POST",body:JSON.stringify({patientId,appointmentId,items})});
+    db.prescriptions=[...db.prescriptions.filter(row=>row.id!==result.prescription.id),{...result.prescription,fromApi:true}];
+    db.pharmacyOrders=[...db.pharmacyOrders.filter(row=>row.id!==result.order.id),{...result.order,fromApi:true}];
+    closeModal(); saveDB(); pushActionToast("Prescription sent to the pharmacy.","🖨 Print prescription",()=>v8PrintRx(result.prescription.id));
+    alert("Prescription submitted. Pharmacy order created automatically."); navigate("prescriptions");
+  }catch(error){
+    alert(error.message||"Unable to submit the prescription.");
+    if(button) button.disabled=false;
+  }
+};
+createPrescription=window.createPrescription;
+
+const localRenderPrescriptions=window.renderPrescriptions;
+window.renderPrescriptions=async function(){
+  if(currentUser?.role==="patient"){navigate("pharmacy");return;}
+  try{await refreshBackendPrescriptions();localRenderPrescriptions();}
+  catch(error){document.getElementById("content").innerHTML=`<h1 class="page-title">Prescriptions</h1><div class="alert alert-danger">Unable to load prescriptions: ${escapeHTML(error.message||"Please try again.")} <button class="btn btn-secondary" onclick="renderPrescriptions()">Retry</button></div>`;}
+};
+renderPrescriptions=window.renderPrescriptions;
+
+const localRenderPharmacy=window.renderPharmacy;
+window.renderPharmacy=async function(){
+  try{
+    await Promise.all([refreshPharmacyOrders(),refreshInventory(),refreshBackendDeliveries(),refreshBackendInvoices(),refreshBackendPrescriptions()]);
+    await localRenderPharmacy();
+  }catch(error){
+    document.getElementById("content").innerHTML=`<h1 class="page-title">Pharmacy Orders</h1><div class="alert alert-danger">Unable to load pharmacy data: ${escapeHTML(error.message||"Please try again.")} <button class="btn btn-secondary" onclick="renderPharmacy()">Retry</button></div>`;
+  }
+};
+renderPharmacy=window.renderPharmacy;
+
+window.createRefillRequest=async function(event){
+  event.preventDefault();
+  const medicineId=document.getElementById("refillMedicine")?.value;
+  const quantity=Number(document.getElementById("refillQty")?.value);
+  const refillNote=(document.getElementById("refillNote")?.value||"").trim();
+  if(!medicineId||!Number.isInteger(quantity)||quantity<1){alert("Choose a medicine and a valid quantity.");return;}
+  try{
+    const result=await apiRequest("/pharmacy/orders",{method:"POST",body:JSON.stringify({
+      type:"NCD Refill",refillNote,items:[{medicineId,quantity,dosage:"As previously prescribed",frequency:"As previously prescribed",duration:"Refill"}]
+    })});
+    const order={...result.order,fromApi:true,items:(result.order.items||[]).map(item=>({...item,medicineName:item.medicineName||item.name}))};
+    db.pharmacyOrders=[...db.pharmacyOrders.filter(item=>item.id!==order.id),order];
+    closeModal(); alert("Refill request submitted to the pharmacy."); await renderPharmacy();
+  }catch(error){alert(error.message||"Unable to submit the refill request.");}
+};
+
+window.processPharmacyOrder=async function(orderId){
+  if(currentUser?.role!=="pharmacist") return;
+  try{
+    const result=await apiRequest(`/pharmacy/orders/${encodeURIComponent(orderId)}/process`,{method:"POST",body:"{}"});
+    const order={...result.order,fromApi:true};
+    db.pharmacyOrders=db.pharmacyOrders.map(item=>item.id===orderId?order:item);
+    const invoice=apiInvoiceToLocal(result.invoice);
+    if(invoice) db.invoices=[...db.invoices.filter(item=>item.id!==invoice.id),invoice];
+    await Promise.all([refreshInventory(),refreshPharmacyOrders()]);
+    saveDB(); alert("Stock confirmed. The medicine invoice is ready for patient payment."); await renderPharmacy();
+  }catch(error){alert(error.message||"Unable to process the pharmacy order.");}
+};
+
+window.saveDeliveryDetails=async function(event,deliveryId){
+  event.preventDefault();
+  if(currentUser?.role!=="pharmacist") return;
+  const delivery=db.deliveries.find(item=>item.id===deliveryId);
+  const orderId=delivery?.pharmacyOrderId||delivery?.orderId;
+  const address=(document.getElementById("deliveryLocation")?.value||"").trim();
+  const directions=(document.getElementById("deliveryDirections")?.value||"").trim();
+  const receiverPhone=(document.getElementById("receiverPhone")?.value||"").trim();
+  const fee=Number(document.getElementById("deliveryFee")?.value);
+  if(!orderId||!address||!directions||!receiverPhone||!Number.isFinite(fee)||fee<0){
+    alert("Please enter a valid location, directions, receiver phone and delivery fee."); return;
+  }
+  try{
+    const result=await apiRequest(`/pharmacy/orders/${encodeURIComponent(orderId)}/delivery`,{
+      method:"POST",body:JSON.stringify({address,directions,receiverPhone,fee})
+    });
+    const saved={...result.delivery,pharmacyOrderId:orderId,deliveryLocation:address,fromApi:true};
+    db.deliveries=[...db.deliveries.filter(item=>item.id!==saved.id),saved];
+    const invoice=apiInvoiceToLocal(result.invoice);
+    if(invoice){
+      invoice.deliveryId=saved.id;
+      invoice.pharmacyOrderId=orderId;
+      db.invoices=[...db.invoices.filter(item=>item.id!==invoice.id),invoice];
+      saved.deliveryInvoiceId=invoice.id;
+    }
+    await refreshPharmacyOrders(); closeModal(); saveDB(); alert("Delivery details saved. The delivery fee is now on the patient's invoice."); await renderPharmacy();
+  }catch(error){alert(error.message||"Unable to save delivery details.");}
+};
+
+window.confirmPharmacyDispatch=async function(orderId){
+  if(currentUser?.role!=="pharmacist") return;
+  const delivery=db.deliveries.find(item=>(item.pharmacyOrderId||item.orderId)===orderId);
+  const riderId=document.getElementById("dispatchRider")?.value;
+  if(!delivery||!riderId){alert("Delivery or rider not found.");return;}
+  try{
+    const updated=await apiRequest(`/deliveries/${encodeURIComponent(delivery.id)}/assign`,{
+      method:"POST",body:JSON.stringify({riderId})
+    });
+    Object.assign(delivery,updated);
+    await refreshBackendDeliveries(); closeModal(); saveDB(); alert("Rider assigned and medicine dispatched successfully."); await renderPharmacy();
+  }catch(error){alert(error.message||"Unable to dispatch the order.");}
+};
+
+window.riderPickUpMedicine=async function(deliveryId){
+  try{Object.assign(db.deliveries.find(d=>d.id===deliveryId)||{},await apiRequest(`/deliveries/${encodeURIComponent(deliveryId)}/pickup`,{method:"POST",body:"{}"}));await refreshBackendDeliveries();await renderDeliveries();}
+  catch(error){alert(error.message||"Unable to confirm medicine pickup.");}
+};
+window.riderConfirmPatientLocation=async function(deliveryId){
+  const delivery=db.deliveries.find(item=>item.id===deliveryId),patient=getUser(delivery?.patientId);
+  if(!confirm(`Call ${patient?.name||"the patient"} at ${delivery?.receiverPhone||patient?.phone||"the recorded phone number"} and confirm the exact location and directions.\n\nHave you confirmed the location by phone?`)) return;
+  try{Object.assign(delivery,await apiRequest(`/deliveries/${encodeURIComponent(deliveryId)}/transit`,{method:"POST",body:"{}"}));await refreshBackendDeliveries();await renderDeliveries();}
+  catch(error){alert(error.message||"Unable to start the delivery.");}
+};
+window.riderMarkDelivered=async function(deliveryId){
+  const otp=prompt("Enter the patient's delivery OTP:");
+  if(otp===null) return;
+  try{Object.assign(db.deliveries.find(d=>d.id===deliveryId)||{},await apiRequest(`/deliveries/${encodeURIComponent(deliveryId)}/complete`,{method:"POST",body:JSON.stringify({otp})}));await refreshBackendDeliveries();alert("Delivery completed successfully.");await renderDeliveries();}
+  catch(error){alert(error.message||"Unable to complete the delivery.");}
+};
+
+const localRenderDeliveries=window.renderDeliveries;
+window.renderDeliveries=async function(){
+  try{await Promise.all([refreshBackendDeliveries(),refreshBackendInvoices()]);await localRenderDeliveries();}
+  catch(error){document.getElementById("content").innerHTML=`<h1 class="page-title">Medicine Deliveries</h1><div class="alert alert-danger">Unable to load deliveries: ${escapeHTML(error.message||"Please try again.")} <button class="btn btn-secondary" onclick="renderDeliveries()">Retry</button></div>`;}
+};
+renderDeliveries=window.renderDeliveries;
+
+const localRenderRiderDashboard=window.renderRiderDashboard;
+window.renderRiderDashboard=async function(){
+  try{await refreshBackendDeliveries();await localRenderRiderDashboard();}
+  catch(error){document.getElementById("content").innerHTML=`<h1 class="page-title">Rider Dashboard</h1><div class="alert alert-danger">Unable to load rider deliveries: ${escapeHTML(error.message||"Please try again.")}</div>`;}
+};
+renderRiderDashboard=window.renderRiderDashboard;
+window.showDeliveryDetailsForm=showDeliveryDetailsForm;
+window.showRefillForm=showRefillForm;
+window.showHomeServiceCatalogForm=showHomeServiceCatalogForm;
+window.downloadReportCSV=downloadReportCSV;
+window.renderReports=renderReports;
 
 /* =========================================================
    INIT

@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: beacon-telemedicine
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --workers 1 --threads 8 --bind 0.0.0.0:$PORT app:app
+    healthCheckPath: /api/health
+    disk:
+      name: beacon-hospital-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: BEACON_DB_FILE
+        value: /var/data/beacon_hospital.db
+      - key: BEACON_ADMIN_PASSWORD
+        sync: false
+      - key: BEACON_SECRET_KEY
+        generateValue: true

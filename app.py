@@ -3,7 +3,9 @@
 Run `pip install -r requirements.txt`, then `python app.py`.
 Open http://127.0.0.1:5000/ for the frontend; API routes are under /api.
 The initial administrator is Boniface Machogu (boniface@beaconafrica.org);
-set BEACON_ADMIN_PASSWORD to change the default password before deployment.
+set BEACON_ADMIN_PASSWORD to change the initial password before deployment.
+For a one-time recovery, set BEACON_RESET_ADMIN_PASSWORD=1 and
+BEACON_ADMIN_PASSWORD to the recovery password, then remove the reset flag.
 """
 # Cell 2 - imports, config and a small SQLite document store
 import os
@@ -17,6 +19,7 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 DB_FILE = os.environ.get("BEACON_DB_FILE", str(Path(__file__).resolve().with_name("beacon_hospital.db")))
 SECRET_KEY = os.environ.get("BEACON_SECRET_KEY") or secrets.token_hex(32)
 ADMIN_PASSWORD = os.environ.get("BEACON_ADMIN_PASSWORD", "Admin@1234")
+RESET_ADMIN_PASSWORD = os.environ.get("BEACON_RESET_ADMIN_PASSWORD", "").lower() in {"1", "true", "yes"}
 LEGACY_ADMIN_PASSWORD = "Demo@1234"
 if len(ADMIN_PASSWORD) < 8:
     raise ValueError("BEACON_ADMIN_PASSWORD must be at least 8 characters")
@@ -26,7 +29,7 @@ HOSPITAL = {"name": "Beacon of Hope Hospital", "lat": -1.3998, "lng": 36.7584,
 SETTINGS = {
     "consultationFee": 1500, "homeAssessmentFee": 1500,
     "openMinutes": 8 * 60, "closeMinutes": 17 * 60,    # 8:00-17:00, Mon-Sat
-    "slotMinutes": 45, "doctorDailyLimit": 10, "perKmAbove30": 20,
+    "slotMinutes": 45, "homeVisitMinutes": 90, "doctorDailyLimit": 10, "perKmAbove30": 20,
 }
 DELIVERY_BANDS = [(3, 100), (5, 150), (10, 250), (15, 350), (20, 450), (25, 550), (30, 650)]
 
@@ -85,7 +88,10 @@ def seed():
                       "email": "boniface@beaconafrica.org", "phone": "0724741827", "enabled": True,
                       "mustChangePassword": True,
                       "passwordHash": generate_password_hash(ADMIN_PASSWORD), "createdAt": now()})
-    elif admin and check_password_hash(admin["passwordHash"], LEGACY_ADMIN_PASSWORD):
+    elif admin and (
+        RESET_ADMIN_PASSWORD
+        or check_password_hash(admin["passwordHash"], LEGACY_ADMIN_PASSWORD)
+    ):
         admin["passwordHash"] = generate_password_hash(ADMIN_PASSWORD)
         admin["mustChangePassword"] = True
         put("users", admin)
@@ -155,6 +161,45 @@ def make_invoice(patient_id, kind, ref_id, amount, description):
                             "amount": amount, "description": description, "status": "Unpaid",
                             "createdAt": now()})
 
+def home_service_catalog():
+    defaults = [{"id": key, "name": value[0], "price": value[1], "description": "", "active": True}
+                for key, value in HOME_SERVICES.items()]
+    saved = {item["id"]: item for item in all_("homeServiceCatalog")}
+    return [saved.pop(item["id"], item) for item in defaults] + list(saved.values())
+
+def home_service_view(row):
+    patient = get("users", row.get("patientId", ""))
+    nurse = get("users", row.get("nurseId", row.get("providerId", "")))
+    return {
+        **row,
+        "requestType": row.get("requestType", "service"),
+        "service": row.get("service", row.get("serviceName", "Home Service")),
+        "date": row.get("date", row.get("preferredDate", "")),
+        "time": row.get("time", row.get("preferredTime", "")),
+        "providerId": row.get("providerId", row.get("nurseId")),
+        "patientName": patient.get("name", "") if patient else "",
+        "patientPhone": patient.get("phone", "") if patient else "",
+        "patientAddress": patient.get("address", "") if patient else "",
+        "nurseName": nurse.get("name", "") if nurse else "",
+    }
+
+def patient_can_book_home_service(patient_id):
+    patient = get("users", patient_id)
+    if not patient or patient.get("role") != "patient":
+        return False
+    if patient.get("patientStatusOverride") == "new":
+        return False
+    if patient.get("patientStatusOverride") == "returning" or patient.get("homeAssessmentStatus") == "approved":
+        return True
+    return (
+        any(a.get("patientId") == patient_id and a.get("status", "").lower() == "completed"
+            for a in all_("appointments"))
+        or any(c.get("patientId") == patient_id and c.get("status", "").lower() == "completed"
+               for c in all_("consultations"))
+        or any(h.get("patientId") == patient_id and h.get("requestType") != "assessment"
+               and h.get("status", "").lower() == "completed" for h in all_("homeServices"))
+    )
+
 @app.get("/api/health")
 def health(): return jsonify({"status": "ok", "hospital": HOSPITAL["name"], "time": now()})
 
@@ -204,6 +249,22 @@ def list_users():
     role = request.args.get("role")
     return jsonify([public(u) for u in all_("users") if not role or u["role"] == role])
 
+@app.get("/api/patients/search")
+@auth("doctor")
+def search_patients():
+    query = request.args.get("q", "").strip().casefold()
+    if len(query) < 2:
+        return err("Search must contain at least 2 characters")
+    matches = [
+        {"id": patient["id"], "name": patient["name"], "phone": patient.get("phone", "")}
+        for patient in all_("users", role="patient")
+        if patient.get("enabled", True)
+        if any(query in str(patient.get(field, "")).casefold()
+               for field in ("id", "name", "phone", "email"))
+    ]
+    matches.sort(key=lambda patient: patient["name"].casefold())
+    return jsonify(matches[:25])
+
 @app.post("/api/users")
 @auth("admin")
 def create_user():
@@ -248,7 +309,7 @@ def edit_user(uid_):
 def catalog():
     return jsonify({"hospital": HOSPITAL, "settings": SETTINGS, "services": SERVICE_CATALOG,
                     "labTests": [{"code": k, "name": v[0], "price": v[1]} for k, v in LAB_TESTS.items()],
-                    "homeServices": [{"id": k, "name": v[0], "price": v[1]} for k, v in HOME_SERVICES.items()],
+                    "homeServices": home_service_catalog(),
                     "deliveryBands": [{"upToKm": l, "fee": f} for l, f in DELIVERY_BANDS] +
                                      [{"aboveKm": 30, "perKm": SETTINGS["perKmAbove30"], "quotation": True}]})
 
@@ -260,6 +321,46 @@ def doctor_day(doctor_id, date):
 
 def overlaps(start, end, apps):
     return any(start < to_min(a["endTime"]) and to_min(a["time"]) < end for a in apps)
+
+def available_doctors(date, start):
+    end = start + SETTINGS["slotMinutes"]
+    doctors = []
+    for doctor in all_("users", role="doctor", enabled=True):
+        appointments = doctor_day(doctor["id"], date)
+        if len(appointments) < SETTINGS["doctorDailyLimit"] and not overlaps(start, end, appointments):
+            doctors.append(doctor)
+    return doctors
+
+@app.get("/api/doctors/availability")
+def doctor_availability():
+    date, time = request.args.get("date", ""), request.args.get("time", "")
+    try:
+        day = dt.date.fromisoformat(date)
+        start = to_min(time)
+        if to_hhmm(start) != time: raise ValueError
+    except ValueError:
+        return err("date (YYYY-MM-DD) and time (HH:MM) are required")
+    if day.weekday() == 6 or start < SETTINGS["openMinutes"] or start + SETTINGS["slotMinutes"] > SETTINGS["closeMinutes"]:
+        return jsonify({"date": date, "time": time, "doctors": [], "suggestedTimes": []})
+
+    doctors = available_doctors(date, start)
+    suggestions = []
+    if not doctors:
+        for candidate_start in range(SETTINGS["openMinutes"], SETTINGS["closeMinutes"] - SETTINGS["slotMinutes"] + 1, 15):
+            candidate_time = to_hhmm(candidate_start)
+            if candidate_start == start:
+                continue
+            if dt.datetime.combine(day, dt.time(candidate_start // 60, candidate_start % 60)) < dt.datetime.now():
+                continue
+            if available_doctors(date, candidate_start):
+                suggestions.append(candidate_time)
+        suggestions.sort(key=lambda candidate: abs(to_min(candidate) - start))
+        suggestions = sorted(suggestions[:4])
+    return jsonify({"date": date, "time": time,
+                    "doctors": [{"id": doctor["id"], "name": doctor["name"],
+                                 "specialty": doctor.get("specialty", "Clinical Provider")}
+                                for doctor in doctors],
+                    "suggestedTimes": suggestions})
 
 @app.get("/api/doctors/<doctor_id>/slots")
 def slots(doctor_id):
@@ -279,7 +380,10 @@ def slots(doctor_id):
 def book():
     d = body()
     doctor = get("users", d.get("doctorId", ""))
-    if not doctor or doctor["role"] != "doctor": return err("Choose a valid doctor")
+    if not doctor or doctor["role"] != "doctor" or not doctor.get("enabled", True): return err("Choose a valid doctor")
+    try: amount = int(d.get("consultationFee", SETTINGS["consultationFee"]))
+    except (TypeError, ValueError): return err("consultationFee must be a valid amount")
+    if amount not in {500, 750, SETTINGS["consultationFee"]}: return err("Invalid consultation fee")
     try:
         day = dt.date.fromisoformat(d["date"]); start = to_min(d["time"])
     except (KeyError, ValueError): return err("date (YYYY-MM-DD) and time (HH:MM) are required")
@@ -291,11 +395,18 @@ def book():
     apps = doctor_day(doctor["id"], d["date"])
     if len(apps) >= SETTINGS["doctorDailyLimit"]: return err("Doctor has reached the daily booking limit", 409)
     if overlaps(start, end, apps): return err("That time overlaps another appointment", 409)
+    patient_apps = [a for a in all_("appointments", patientId=g.user["id"], date=d["date"])
+                    if a["status"] != "Cancelled"]
+    if overlaps(start, end, patient_apps): return err("You already have another appointment during this time", 409)
     appt = put("appointments", {"id": uid("apt"), "patientId": g.user["id"], "doctorId": doctor["id"],
                                 "date": d["date"], "time": to_hhmm(start), "endTime": to_hhmm(end),
-                                "reason": d.get("reason", ""), "status": "Pending Payment", "createdAt": now()})
-    inv = make_invoice(g.user["id"], "consultation", appt["id"], SETTINGS["consultationFee"],
-                       f"Consultation with {doctor['name']}")
+                                "type": d.get("type", "Video Consultation"),
+                                "specialty": doctor.get("specialty", "Clinical Provider"),
+                                "consultationService": d.get("consultationService", "Consultation"),
+                                "consultationFee": amount, "reason": d.get("reason", ""),
+                                "status": "Pending Payment", "createdAt": now()})
+    inv = make_invoice(g.user["id"], "consultation", appt["id"], amount,
+                       f"{appt['consultationService']} with {doctor['name']}")
     notify(doctor["id"], f"New appointment request on {d['date']} at {to_hhmm(start)}")
     return jsonify({"appointment": appt, "invoice": inv}), 201
 
@@ -323,10 +434,13 @@ def cancel(aid):
 def start_consultation(aid):
     a = get("appointments", aid)
     if not a or a["doctorId"] != g.user["id"]: return err("Appointment not found", 404)
+    existing = all_("consultations", appointmentId=aid)
+    if existing: return jsonify(existing[0])
     if a["status"] != "Confirmed": return err("Appointment must be paid/confirmed first", 409)
     update("appointments", aid, status="In Consultation")
     c = put("consultations", {"id": uid("con"), "appointmentId": aid, "patientId": a["patientId"],
-                              "doctorId": g.user["id"], "room": f"beacon-{aid}", "startedAt": now()})
+                              "doctorId": g.user["id"], "room": f"beacon-{aid}", "startedAt": now(),
+                              "clinicalNotes": "", "diagnosis": ""})
     notify(a["patientId"], "Your doctor has started the consultation - please join")
     return jsonify(c)
 
@@ -336,26 +450,69 @@ def end_consultation(aid):
     a, d = get("appointments", aid), body()
     if not a or a["doctorId"] != g.user["id"]: return err("Appointment not found", 404)
     if a["status"] != "In Consultation": return err("Consultation not in progress", 409)
-    c = next(c for c in all_("consultations", appointmentId=aid))
-    update("consultations", c["id"], notes=d.get("notes", ""), diagnosis=d.get("diagnosis", ""), endedAt=now())
+    consultations = all_("consultations", appointmentId=aid)
+    if not consultations: return err("Consultation record not found", 404)
+    c = consultations[0]
+    update("consultations", c["id"], notes=d.get("clinicalNotes", d.get("notes", "")),
+           clinicalNotes=d.get("clinicalNotes", d.get("notes", "")),
+           diagnosis=d.get("diagnosis", ""), endedAt=now())
     return jsonify(update("appointments", aid, status="Completed"))
+
+@app.get("/api/consultations")
+@auth("patient", "doctor", "admin")
+def list_consultations():
+    user = g.user
+    rows = all_("consultations")
+    if user["role"] == "patient":
+        rows = [c for c in rows if c["patientId"] == user["id"]]
+    elif user["role"] == "doctor":
+        rows = [c for c in rows if c["doctorId"] == user["id"]]
+    return jsonify(sorted(rows, key=lambda c: c.get("startedAt", c.get("createdAt", "")), reverse=True))
+
+@app.put("/api/consultations/<aid>/notes")
+@auth("doctor")
+def save_consultation_notes(aid):
+    appointment = get("appointments", aid)
+    if not appointment or appointment["doctorId"] != g.user["id"]:
+        return err("Consultation not found", 404)
+    consultations = all_("consultations", appointmentId=aid)
+    if not consultations: return err("Consultation has not been started", 409)
+    d = body()
+    return jsonify(update("consultations", consultations[0]["id"],
+                         notes=d.get("clinicalNotes", ""), diagnosis=d.get("diagnosis", "")))
 
 @app.post("/api/prescriptions")
 @auth("doctor")
 def prescribe():
-    d = body(); a = get("appointments", d.get("appointmentId", ""))
-    if not a or a["doctorId"] != g.user["id"]: return err("Appointment not found", 404)
+    d = body()
+    appointment_id = d.get("appointmentId")
+    appointment = get("appointments", appointment_id) if appointment_id else None
+    if appointment_id and (not appointment or appointment["doctorId"] != g.user["id"]):
+        return err("Appointment not found", 404)
+    patient_id = appointment["patientId"] if appointment else d.get("patientId")
+    patient = get("users", patient_id or "")
+    if not patient or patient.get("role") != "patient": return err("Choose a valid patient")
     items = []
     for it in d.get("items", []):
         med = get("inventory", it.get("medicineId", ""))
         if not med: return err(f"Unknown medicine {it.get('medicineId')}")
-        items.append({"medicineId": med["id"], "name": med["name"], "quantity": int(it.get("quantity", 1)),
-                      "dosage": it.get("dosage", "")})
+        try: quantity = int(it.get("quantity", 1))
+        except (TypeError, ValueError): return err("Medicine quantity must be a positive integer")
+        if quantity < 1: return err("Medicine quantity must be a positive integer")
+        items.append({"medicineId": med["id"], "name": med["name"], "medicineName": med["name"],
+                      "quantity": quantity, "dosage": it.get("dosage", ""),
+                      "frequency": it.get("frequency", ""), "duration": it.get("duration", "")})
     if not items: return err("Add at least one medicine")
-    p = put("prescriptions", {"id": uid("rx"), "appointmentId": a["id"], "patientId": a["patientId"],
-                              "doctorId": g.user["id"], "items": items, "createdAt": now()})
-    notify(a["patientId"], "A new prescription is available")
-    return jsonify(p), 201
+    prescription = put("prescriptions", {"id": uid("rx"), "appointmentId": appointment_id,
+                                         "patientId": patient_id, "doctorId": g.user["id"],
+                                         "items": items, "createdAt": now()})
+    order = put("pharmacyOrders", {"id": uid("ord"), "patientId": patient_id,
+                                   "prescriptionId": prescription["id"], "type": "Prescription",
+                                   "items": items, "status": "Pending", "createdAt": now()})
+    notify(patient_id, "A new prescription has been sent to the pharmacy")
+    for pharmacist in all_("users", role="pharmacist", enabled=True):
+        notify(pharmacist["id"], f"New pharmacy order {order['id']} is waiting for stock processing")
+    return jsonify({"prescription": prescription, "order": order}), 201
 
 @app.get("/api/prescriptions")
 @auth("patient", "doctor", "pharmacist", "admin")
@@ -363,30 +520,78 @@ def prescriptions():
     r, u = all_("prescriptions"), g.user
     if u["role"] == "patient": r = [p for p in r if p["patientId"] == u["id"]]
     if u["role"] == "doctor": r = [p for p in r if p["doctorId"] == u["id"]]
+    if u["role"] == "patient": r = [{k: v for k, v in p.items() if k != "items"} for p in r]
     return jsonify(r)
 
 @app.post("/api/pharmacy/orders")
 @auth("patient")
 def order_medicine():
-    rx = get("prescriptions", body().get("prescriptionId", ""))
-    if not rx or rx["patientId"] != g.user["id"]: return err("Prescription not found", 404)
-    total = 0
-    for it in rx["items"]:
-        med = get("inventory", it["medicineId"])
-        if med["quantity"] < it["quantity"]: return err(f"Insufficient stock for {med['name']}", 409)
-        total += med["price"] * it["quantity"]
-    order = put("pharmacyOrders", {"id": uid("ord"), "patientId": g.user["id"], "prescriptionId": rx["id"],
-                                   "items": rx["items"], "medicineTotal": total,
-                                   "status": "Awaiting Pharmacy Payment", "createdAt": now()})
-    inv = make_invoice(g.user["id"], "medicine", order["id"], total, "Medicine order")
-    for ph in all_("users", role="pharmacist"): notify(ph["id"], f"New medicine order {order['id']}")
-    return jsonify({"order": order, "invoice": inv}), 201
+    d = body()
+    rx = get("prescriptions", d.get("prescriptionId", ""))
+    if d.get("prescriptionId") and (not rx or rx["patientId"] != g.user["id"]):
+        return err("Prescription not found", 404)
+
+    items = []
+    for item in rx["items"] if rx else d.get("items", []):
+        med = get("inventory", item.get("medicineId", ""))
+        if not med:
+            return err(f"Unknown medicine {item.get('medicineId')}")
+        try:
+            quantity = int(item.get("quantity", 0))
+        except (TypeError, ValueError):
+            return err("Medicine quantity must be a positive integer")
+        if quantity < 1:
+            return err("Medicine quantity must be a positive integer")
+        if med.get("expiry", "9999-12-31") < dt.date.today().isoformat():
+            return err(f"{med['name']} has expired", 409)
+        if med["quantity"] < quantity:
+            return err(f"Insufficient stock for {med['name']}", 409)
+        items.append({**item, "medicineId": med["id"], "name": med["name"],
+                      "medicineName": med["name"], "quantity": quantity})
+    if not items:
+        return err("Add at least one medicine")
+
+    total = sum(get("inventory", item["medicineId"])["price"] * item["quantity"] for item in items)
+    order = put("pharmacyOrders", {
+        "id": uid("ord"), "patientId": g.user["id"],
+        "prescriptionId": rx["id"] if rx else None,
+        "type": "Prescription" if rx else d.get("type", "NCD Refill"),
+        "items": items, "medicineTotal": total,
+        "refillNote": d.get("refillNote", ""),
+        "status": "Awaiting Pharmacy Payment" if rx else "Pending",
+        "createdAt": now(),
+    })
+    invoice = make_invoice(g.user["id"], "medicine", order["id"], total, "Medicine order") if rx else None
+    for pharmacist in all_("users", role="pharmacist", enabled=True):
+        notify(pharmacist["id"], f"New medicine order {order['id']}")
+    return jsonify({"order": order, "invoice": invoice}), 201
 
 @app.get("/api/pharmacy/orders")
-@auth("patient", "pharmacist", "admin")
+@auth("patient", "pharmacist", "admin", "doctor")
 def list_orders():
     rows = all_("pharmacyOrders", patientId=g.user["id"]) if g.user["role"] == "patient" else all_("pharmacyOrders")
+    if g.user["role"] == "patient": rows = [{k: v for k, v in order.items() if k != "items"} for order in rows]
     return jsonify(rows)
+
+@app.post("/api/pharmacy/orders/<oid>/process")
+@auth("pharmacist")
+def process_pharmacy_order(oid):
+    order = get("pharmacyOrders", oid)
+    if not order: return err("Order not found", 404)
+    if order["status"] != "Pending": return err(f"Order is '{order['status']}'", 409)
+    total = 0
+    for item in order.get("items", []):
+        med = get("inventory", item.get("medicineId", ""))
+        if not med or med["quantity"] < int(item.get("quantity", 0)):
+            return err(f"Insufficient stock for {item.get('medicineName', item.get('name', 'medicine'))}", 409)
+        if med.get("expiry", "9999-12-31") < dt.date.today().isoformat():
+            return err(f"{med['name']} has expired", 409)
+        if med.get("expiry", "9999-12-31") < dt.date.today().isoformat():
+            return err(f"{med['name']} has expired", 409)
+        total += float(med["price"]) * int(item["quantity"])
+    order = update("pharmacyOrders", oid, medicineTotal=total, status="Awaiting Pharmacy Payment")
+    invoice = make_invoice(order["patientId"], "medicine", oid, total, "Medicine order")
+    return jsonify({"order": order, "invoice": invoice})
 
 @app.post("/api/pharmacy/orders/<oid>/delivery")
 @auth("pharmacist")
@@ -394,15 +599,41 @@ def set_delivery(oid):
     o, d = get("pharmacyOrders", oid), body()
     if not o: return err("Order not found", 404)
     if o["status"] != "Awaiting Delivery Details": return err(f"Order is '{o['status']}'", 409)
-    try: lat, lng = float(d["lat"]), float(d["lng"])
-    except (KeyError, ValueError): return err("lat and lng of the patient are required")
-    km = round(haversine_km(HOSPITAL["lat"], HOSPITAL["lng"], lat, lng), 2)
-    fee, quotation = delivery_fee(km)
-    inv = make_invoice(o["patientId"], "delivery", oid, fee, f"Delivery ({km} km)")
-    update("pharmacyOrders", oid, status="Awaiting Delivery Payment", deliveryKm=km, deliveryFee=fee,
-           deliveryAddress=d.get("address", ""), deliveryLat=lat, deliveryLng=lng, quotation=quotation)
-    notify(o["patientId"], f"Delivery fee quoted: KES {fee} ({km} km)")
-    return jsonify({"distanceKm": km, "fee": fee, "quotation": quotation, "invoice": inv})
+    if "fee" in d:
+        address = str(d.get("address", "")).strip()
+        directions = str(d.get("directions", "")).strip()
+        receiver_phone = str(d.get("receiverPhone", "")).strip()
+        try: fee = float(d["fee"])
+        except (TypeError, ValueError): return err("Delivery fee must be numeric")
+        if not address or not directions or not receiver_phone or fee < 0:
+            return err("Address, directions, receiver phone and a non-negative fee are required")
+        km, quotation = None, False
+    else:
+        try: lat, lng = float(d["lat"]), float(d["lng"])
+        except (KeyError, TypeError, ValueError): return err("lat and lng of the patient are required")
+        km = round(haversine_km(HOSPITAL["lat"], HOSPITAL["lng"], lat, lng), 2)
+        fee, quotation = delivery_fee(km)
+        address, directions, receiver_phone = str(d.get("address", "")).strip(), "", ""
+
+    delivery = next((row for row in all_("deliveries") if row.get("orderId", row.get("pharmacyOrderId")) == oid), None)
+    delivery_fields = {
+        "orderId": oid, "pharmacyOrderId": oid, "patientId": o["patientId"], "riderId": None,
+        "status": "Awaiting Delivery Payment", "deliveryLocation": address, "deliveryAddress": address,
+        "directions": directions, "receiverPhone": receiver_phone, "deliveryFee": fee,
+        "deliveryKm": km, "quotation": quotation, "updatedAt": now(),
+    }
+    delivery = update("deliveries", delivery["id"], **delivery_fields) if delivery else put(
+        "deliveries", {"id": uid("dlv"), **delivery_fields, "otp": f"{secrets.randbelow(10000):04d}",
+                       "createdAt": now()})
+    pending_invoice = next((invoice for invoice in all_("invoices", refId=oid)
+                            if invoice.get("kind") == "delivery" and invoice.get("status") != "Paid"), None)
+    inv = update("invoices", pending_invoice["id"], amount=fee, description="Medicine delivery") if pending_invoice else \
+        make_invoice(o["patientId"], "delivery", oid, fee, "Medicine delivery")
+    update("pharmacyOrders", oid, status="Awaiting Delivery Payment", deliveryId=delivery["id"],
+           deliveryFee=fee, deliveryAddress=address)
+    notify(o["patientId"], f"Delivery details confirmed. Delivery fee: KES {fee}.")
+    return jsonify({"delivery": view_delivery(delivery), "invoice": inv, "distanceKm": km, "fee": fee,
+                    "quotation": quotation})
 # Cell 8 - payments (simulated M-Pesa) and the delivery lifecycle
 def after_payment(inv):
     """Move the related record to its next status once an invoice is paid."""
@@ -411,24 +642,48 @@ def after_payment(inv):
         update("appointments", ref, status="Confirmed")
     elif k == "medicine":
         o = get("pharmacyOrders", ref)
+        if not o: return
         for it in o["items"]:
-            med = get("inventory", it["medicineId"]); update("inventory", med["id"], quantity=med["quantity"] - it["quantity"])
+            med = get("inventory", it["medicineId"])
+            if med: update("inventory", med["id"], quantity=med["quantity"] - it["quantity"])
         update("pharmacyOrders", ref, status="Awaiting Delivery Details")
+        if not any(d.get("orderId", d.get("pharmacyOrderId")) == ref for d in all_("deliveries")):
+            put("deliveries", {"id": uid("dlv"), "orderId": ref, "pharmacyOrderId": ref,
+                               "patientId": o["patientId"], "riderId": None,
+                               "otp": f"{secrets.randbelow(10000):04d}",
+                               "status": "Awaiting Delivery Details", "createdAt": now()})
     elif k == "delivery":
         o = update("pharmacyOrders", ref, status="Paid - Awaiting Dispatch")
-        put("deliveries", {"id": uid("dlv"), "orderId": ref, "patientId": o["patientId"], "riderId": None,
-                           "otp": f"{secrets.randbelow(10000):04d}", "status": "Paid - Awaiting Dispatch",
-                           "createdAt": now()})
+        delivery = next((d for d in all_("deliveries")
+                         if d.get("orderId", d.get("pharmacyOrderId")) == ref), None)
+        if delivery:
+            update("deliveries", delivery["id"], status="Paid - Awaiting Dispatch")
+        else:
+            put("deliveries", {"id": uid("dlv"), "orderId": ref, "pharmacyOrderId": ref,
+                               "patientId": o["patientId"], "riderId": None,
+                               "otp": f"{secrets.randbelow(10000):04d}",
+                               "status": "Paid - Awaiting Dispatch", "createdAt": now()})
         for ph in all_("users", role="pharmacist"): notify(ph["id"], f"Order {ref} paid - assign a rider")
     elif k == "lab":
         update("labRequests", ref, status="Paid - Awaiting Sample")
     elif k == "homeAssessment":
-        update("homeServices", ref, status="Paid - Awaiting Assignment")
+        service = get("homeServices", ref)
+        if service:
+            update("homeServices", ref, status="Paid - Awaiting Assignment")
+            if service.get("requestType") == "assessment":
+                patient = get("users", service["patientId"])
+                if patient: update("users", patient["id"], homeAssessmentStatus="paid_pending")
+    elif k == "homeService":
+        if get("homeServices", ref):
+            update("homeServices", ref, status="Paid - Awaiting Assignment")
 
 @app.get("/api/invoices")
-@auth("patient", "admin")
+@auth("patient", "pharmacist", "admin")
 def invoices():
-    return jsonify(all_("invoices", patientId=g.user["id"]) if g.user["role"] == "patient" else all_("invoices"))
+    rows = all_("invoices", patientId=g.user["id"]) if g.user["role"] == "patient" else all_("invoices")
+    if g.user["role"] == "pharmacist":
+        rows = [row for row in rows if row.get("kind") in ("medicine", "delivery")]
+    return jsonify(rows)
 
 @app.post("/api/invoices/<iid>/pay")
 @auth("patient")
@@ -436,6 +691,13 @@ def pay(iid):
     inv, d = get("invoices", iid), body()
     if not inv or inv["patientId"] != g.user["id"]: return err("Invoice not found", 404)
     if inv["status"] == "Paid": return err("Invoice already paid", 409)
+    if inv.get("kind") == "medicine":
+        order = get("pharmacyOrders", inv.get("refId", ""))
+        if not order: return err("Medicine order not found", 404)
+        for item in order.get("items", []):
+            med = get("inventory", item.get("medicineId", ""))
+            if not med or med["quantity"] < int(item.get("quantity", 0)):
+                return err(f"Insufficient stock for {item.get('medicineName', item.get('name', 'medicine'))}", 409)
     # DEMO ONLY - replace with a real M-Pesa Daraja STK push + callback here
     pay_rec = put("payments", {"id": uid("pay"), "invoiceId": iid, "amount": inv["amount"],
                                "method": d.get("method", "M-Pesa"), "phone": d.get("phone", g.user["phone"]),
@@ -446,6 +708,20 @@ def pay(iid):
 
 def view_delivery(dv):
     d = dict(dv)
+    order_id = d.get("orderId", d.get("pharmacyOrderId", ""))
+    d["orderId"] = order_id
+    d["pharmacyOrderId"] = order_id
+    d.setdefault("deliveryLocation", d.get("deliveryAddress", ""))
+    order = get("pharmacyOrders", order_id) if order_id else None
+    if order:
+        d.setdefault("deliveryLocation", order.get("deliveryAddress", ""))
+        d.setdefault("deliveryFee", order.get("deliveryFee"))
+    invoice = next((row for row in all_("invoices")
+                    if row.get("kind") == "delivery" and row.get("refId") == order_id), None)
+    d["deliveryPaymentStatus"] = "Paid" if invoice and invoice.get("status") == "Paid" else \
+        "Pending" if invoice else "Not invoiced"
+    if d.get("status") == "Picked Up - Call Receiver":
+        d["status"] = "Picked Up - Confirm Patient Location"
     if g.user["role"] != "patient": d.pop("otp", None)      # only the patient sees the OTP
     return d
 
@@ -459,7 +735,9 @@ def deliveries():
 
 def set_delivery_status(did, status, **extra):
     dv = update("deliveries", did, status=status, **extra)
-    update("pharmacyOrders", dv["orderId"], status=status)
+    order_id = dv.get("orderId", dv.get("pharmacyOrderId", ""))
+    if order_id and get("pharmacyOrders", order_id):
+        update("pharmacyOrders", order_id, status=status)
     notify(dv["patientId"], f"Your delivery is now: {status}")
     return dv
 
@@ -468,7 +746,7 @@ def set_delivery_status(did, status, **extra):
 def assign_rider(did):
     dv, rider = get("deliveries", did), get("users", body().get("riderId", ""))
     if not dv: return err("Delivery not found", 404)
-    if not rider or rider["role"] != "rider": return err("Choose a valid rider")
+    if not rider or rider["role"] != "rider" or not rider.get("enabled", True): return err("Choose a valid enabled rider")
     if dv["status"] != "Paid - Awaiting Dispatch": return err(f"Delivery is '{dv['status']}'", 409)
     notify(rider["id"], f"New delivery assigned: {did}")
     return jsonify(view_delivery(set_delivery_status(did, "Assigned", riderId=rider["id"])))
@@ -499,88 +777,282 @@ def complete(did):
 @app.post("/api/lab-requests")
 @auth("patient", "doctor")
 def lab_request():
-    d = body(); codes = d.get("tests", [])
+    d = body()
+    codes = d.get("tests", [])
+    if isinstance(codes, str): codes = [codes]
+    if not codes and d.get("testName"):
+        requested_names = d["testName"] if isinstance(d["testName"], list) else [d["testName"]]
+        codes = [code for code, (name, _) in LAB_TESTS.items() if name in requested_names]
     if not codes or any(c not in LAB_TESTS for c in codes): return err("Choose valid tests: " + ", ".join(LAB_TESTS))
     pid = g.user["id"] if g.user["role"] == "patient" else d.get("patientId")
-    if not get("users", pid or ""): return err("patientId required")
+    patient = get("users", pid or "")
+    if not patient or patient["role"] != "patient": return err("Choose a valid patient")
     total = sum(LAB_TESTS[c][1] for c in codes)
     lr = put("labRequests", {"id": uid("lab"), "patientId": pid, "requestedBy": g.user["id"],
-                             "tests": [LAB_TESTS[c][0] for c in codes], "total": total,
+                             "tests": [LAB_TESTS[c][0] for c in codes], "testName": ", ".join(LAB_TESTS[c][0] for c in codes),
+                             "notes": d.get("notes", ""), "urgency": d.get("urgency", "Routine"), "total": total,
                              "status": "Awaiting Payment", "createdAt": now()})
+    for tech in all_("users", role="lab_technician", enabled=True):
+        notify(tech["id"], f"New laboratory request {lr['id']} is awaiting payment")
     return jsonify({"labRequest": lr, "invoice": make_invoice(pid, "lab", lr["id"], total, "Laboratory tests")}), 201
 
 @app.get("/api/lab-requests")
-@auth("patient", "doctor", "nurse", "admin")
+@auth("patient", "doctor", "nurse", "lab_technician", "admin")
 def labs():
     rows = all_("labRequests")
-    return jsonify([r for r in rows if r["patientId"] == g.user["id"]] if g.user["role"] == "patient" else rows)
+    user = g.user
+    if user["role"] == "patient":
+        rows = [r for r in rows if r["patientId"] == user["id"]]
+    elif user["role"] == "doctor":
+        rows = [r for r in rows if r.get("requestedBy") == user["id"]]
+    enriched = []
+    for row in rows:
+        patient = get("users", row["patientId"])
+        requester = get("users", row.get("requestedBy", ""))
+        enriched.append({**row, "patientName": patient.get("name", "") if patient else "",
+                         "patientPhone": patient.get("phone", "") if patient else "",
+                         "requestedByName": requester.get("name", "") if requester else ""})
+    return jsonify(sorted(enriched, key=lambda r: r.get("createdAt", ""), reverse=True))
 
 @app.post("/api/lab-requests/<lid>/results")
-@auth("nurse", "doctor", "admin")
+@auth("lab_technician")
 def lab_results(lid):
     lr = get("labRequests", lid)
     if not lr: return err("Lab request not found", 404)
-    if lr["status"] != "Paid - Awaiting Sample": return err(f"Lab request is '{lr['status']}'", 409)
-    notify(lr["patientId"], "Your lab results are ready")
-    return jsonify(update("labRequests", lid, results=body().get("results", {}), status="Completed"))
+    d = body()
+    result = d.get("results", d.get("result", ""))
+    status = d.get("status", "Completed")
+    if status not in ("Processing", "Completed"):
+        return err("Status must be Processing or Completed")
+    valid_result = (
+        isinstance(result, str) and bool(result.strip())
+        or isinstance(result, (dict, list)) and bool(result)
+    )
+    if status == "Completed" and not valid_result:
+        return err("Laboratory results are required")
+    if status == "Processing" and lr["status"] not in ("Paid - Awaiting Sample", "Processing"):
+        return err(f"Lab request is '{lr['status']}'", 409)
+    if status == "Completed" and lr["status"] not in ("Paid - Awaiting Sample", "Processing", "Completed"):
+        return err(f"Lab request is '{lr['status']}'", 409)
+    updated = update("labRequests", lid, results=result, result=result, status=status,
+                     processedBy=g.user["id"], processedByName=g.user["name"],
+                     **({"resultDate": now()} if status == "Completed" else {}))
+    if status == "Completed":
+        notify(lr["patientId"], "Your lab results are ready")
+        if lr.get("requestedBy"):
+            notify(lr["requestedBy"], "A requested laboratory result is ready")
+    return jsonify(updated)
 
 @app.post("/api/home-services")
 @auth("patient")
 def home_service():
     d = body()
-    if d.get("serviceId") not in HOME_SERVICES: return err("Invalid serviceId")
-    if not d.get("address"): return err("address is required")
-    hs = put("homeServices", {"id": uid("home"), "patientId": g.user["id"], "serviceId": d["serviceId"],
-                              "serviceName": HOME_SERVICES[d["serviceId"]][0], "servicePrice": HOME_SERVICES[d["serviceId"]][1],
-                              "address": d["address"], "preferredDate": d.get("date", ""), "notes": d.get("notes", ""),
-                              "nurseId": None, "status": "Awaiting Assessment Payment", "createdAt": now()})
-    inv = make_invoice(g.user["id"], "homeAssessment", hs["id"], SETTINGS["homeAssessmentFee"], "Home assessment fee")
-    return jsonify({"homeService": hs, "invoice": inv}), 201
+    request_type = d.get("requestType", "service")
+    date, time = str(d.get("date", "")).strip(), str(d.get("time", "")).strip()
+    address = str(d.get("address", "")).strip()
+    nurse_id = str(d.get("providerId", d.get("nurseId", ""))).strip()
+    if request_type not in ("assessment", "service"): return err("Invalid home-service request type")
+    if not address or not date or not time: return err("address, date and time are required")
+    try:
+        booking_date = dt.date.fromisoformat(date)
+        start = to_min(time)
+    except (TypeError, ValueError): return err("A valid date and time are required")
+    if booking_date < dt.date.today() or booking_date.weekday() == 6 or start < SETTINGS["openMinutes"] or start > SETTINGS["closeMinutes"]:
+        return err("Home visits are available 08:00–17:00, Monday to Saturday")
+    if booking_date == dt.date.today() and start <= dt.datetime.now().hour * 60 + dt.datetime.now().minute:
+        return err("Choose a future home-visit time")
+    nurse = get("users", nurse_id)
+    if not nurse or nurse.get("role") != "nurse" or not nurse.get("enabled", True):
+        return err("Choose an enabled nursing officer")
+    for existing in all_("homeServices"):
+        if existing.get("nurseId", existing.get("providerId")) != nurse_id:
+            continue
+        if existing.get("date", existing.get("preferredDate")) != date or existing.get("status") in ("Cancelled", "Completed", "Not Suitable"):
+            continue
+        existing_start = to_min(existing.get("time", existing.get("preferredTime", "00:00")))
+        visit_minutes = SETTINGS["homeVisitMinutes"]
+        if start < existing_start + visit_minutes and existing_start < start + visit_minutes:
+            return err("That nursing officer is already booked at this time", 409)
+
+    if request_type == "assessment":
+        active_assessment = any(
+            row.get("patientId") == g.user["id"] and row.get("requestType") == "assessment"
+            and row.get("status") not in ("Cancelled", "Completed", "Not Suitable")
+            for row in all_("homeServices")
+        )
+        if active_assessment: return err("You already have an active home assessment request", 409)
+        service_id, service_name = "", "Home Assessment"
+        service_price, transport_fee = float(SETTINGS["homeAssessmentFee"]), 0
+        total = service_price
+    else:
+        if not patient_can_book_home_service(g.user["id"]):
+            return err("Complete a home assessment or clinical encounter before booking a home service", 403)
+        catalog_item = next((item for item in home_service_catalog()
+                             if item["id"] == d.get("serviceId") and item.get("active", True)), None)
+        if not catalog_item: return err("Choose a valid active home service")
+        service_id, service_name = catalog_item["id"], catalog_item["name"]
+        service_price = float(catalog_item["price"])
+        try: transport_fee = float(d.get("transportFee", 0))
+        except (TypeError, ValueError): return err("Transport fee is invalid")
+        if transport_fee not in (0, 300, 500): return err("Choose a valid transport fee")
+        total = service_price + transport_fee
+
+    status = "Pending Payment"
+    hs = put("homeServices", {
+        "id": uid("home"), "patientId": g.user["id"], "serviceId": service_id,
+        "serviceName": service_name, "service": service_name, "servicePrice": service_price,
+        "serviceFee": service_price, "transportFee": transport_fee, "total": total,
+        "transportBand": d.get("transportBand", "0"), "transportQuotation": bool(d.get("transportQuotation", False)),
+        "address": address, "preferredDate": date, "date": date, "preferredTime": time, "time": time,
+        "notes": d.get("notes", ""), "requestType": request_type, "nurseId": nurse_id,
+        "providerId": nurse_id, "status": status, "createdAt": now(),
+    })
+    kind = "homeAssessment" if request_type == "assessment" else "homeService"
+    description = "Home assessment fee" if request_type == "assessment" else service_name
+    inv = make_invoice(g.user["id"], kind, hs["id"], total, description)
+    hs = update("homeServices", hs["id"], invoiceId=inv["id"])
+    if request_type == "assessment":
+        update("users", g.user["id"], homeAssessmentStatus="paid_pending")
+    notify(nurse_id, f"Home visit requested: {service_name} on {date} at {time}")
+    return jsonify({"homeService": home_service_view(hs), "invoice": inv}), 201
 
 @app.get("/api/home-services")
 @auth("patient", "nurse", "admin")
 def list_home():
     rows, u = all_("homeServices"), g.user
     if u["role"] == "patient": rows = [r for r in rows if r["patientId"] == u["id"]]
-    if u["role"] == "nurse": rows = [r for r in rows if r["nurseId"] == u["id"]]
-    return jsonify(rows)
+    if u["role"] == "nurse": rows = [r for r in rows if r.get("nurseId", r.get("providerId")) == u["id"]]
+    return jsonify([home_service_view(row) for row in sorted(rows, key=lambda r: r.get("createdAt", ""), reverse=True)])
+
+@app.get("/api/home-services/eligibility")
+@auth("patient")
+def home_service_eligibility():
+    can_book = patient_can_book_home_service(g.user["id"])
+    status = g.user.get("homeAssessmentStatus", "")
+    if not status:
+        status = "Returning Client" if can_book else "New Client"
+    return jsonify({"canBookDirectly": can_book, "homeAssessmentStatus": status})
+
+@app.get("/api/home-services/providers")
+@auth("patient", "admin", "nurse")
+def home_service_providers():
+    return jsonify([{"id": nurse["id"], "name": nurse["name"],
+                     "role": nurse["role"], "enabled": nurse.get("enabled", True),
+                     "homeServiceProvider": nurse.get("homeServiceProvider", True)}
+                    for nurse in all_("users", role="nurse")
+                    if nurse.get("enabled", True) and nurse.get("homeServiceProvider", True)])
 
 @app.post("/api/home-services/<hid>/assign")
 @auth("admin")
 def assign_nurse(hid):
     hs, nurse = get("homeServices", hid), get("users", body().get("nurseId", ""))
     if not hs: return err("Request not found", 404)
-    if not nurse or nurse["role"] != "nurse": return err("Choose a valid nurse")
-    if hs["status"] != "Paid - Awaiting Assignment": return err(f"Request is '{hs['status']}'", 409)
+    if not nurse or nurse["role"] != "nurse" or not nurse.get("enabled", True): return err("Choose a valid enabled nurse")
+    if hs["status"] not in ("Paid - Awaiting Assignment", "Assigned"): return err(f"Request is '{hs['status']}'", 409)
     notify(nurse["id"], f"Home visit assigned: {hs['serviceName']}")
-    return jsonify(update("homeServices", hid, nurseId=nurse["id"], status="Assigned"))
+    return jsonify(home_service_view(update("homeServices", hid, nurseId=nurse["id"], providerId=nurse["id"], status="Assigned")))
 
 @app.post("/api/home-services/<hid>/complete")
 @auth("nurse")
 def finish_home(hid):
     hs = get("homeServices", hid)
-    if not hs or hs["nurseId"] != g.user["id"]: return err("Request not found", 404)
-    return jsonify(update("homeServices", hid, status="Completed", visitNotes=body().get("notes", "")))
+    if not hs or hs.get("nurseId", hs.get("providerId")) != g.user["id"]: return err("Request not found", 404)
+    if hs.get("status") not in ("Paid - Awaiting Assignment", "Assigned"):
+        return err(f"Request is '{hs.get('status', 'Unknown')}'", 409)
+    d = body()
+    if hs.get("requestType") == "assessment":
+        outcome = d.get("outcome")
+        if outcome not in ("approved", "completed_not_suitable"): return err("Choose an assessment outcome")
+        status = "Completed" if outcome == "approved" else "Not Suitable"
+        patient = get("users", hs["patientId"])
+        if patient: update("users", patient["id"], homeAssessmentStatus=outcome)
+        updated = update("homeServices", hs["id"], status=status, outcome=outcome,
+                         assessmentNotes=d.get("notes", ""), visitNotes=d.get("notes", ""),
+                         assessedBy=g.user["id"], assessedAt=now())
+    else:
+        updated = update("homeServices", hs["id"], status="Completed", visitNotes=d.get("notes", ""))
+    notify(hs["patientId"], "Your home visit has been completed.")
+    return jsonify(home_service_view(updated))
+
+@app.post("/api/home-services/catalog")
+@auth("admin")
+def add_home_service_catalog():
+    d = body()
+    name, description = d.get("name"), d.get("description")
+    try: price = float(d.get("price"))
+    except (TypeError, ValueError): return err("A valid service price is required")
+    if not isinstance(name, str) or not name.strip() or not isinstance(description, str) or not description.strip() or price < 0:
+        return err("Service name, description and a non-negative price are required")
+    if any(item["name"].casefold() == name.strip().casefold() for item in home_service_catalog()):
+        return err("A service with this name already exists", 409)
+    item = {"id": uid("home_catalog"), "name": name.strip(), "description": description.strip(),
+            "price": price, "active": True}
+    put("homeServiceCatalog", item)
+    return jsonify(item), 201
+
+@app.patch("/api/home-services/catalog/<service_id>")
+@auth("admin")
+def edit_home_service_catalog(service_id):
+    item = next((entry for entry in home_service_catalog() if entry["id"] == service_id), None)
+    if not item: return err("Home service not found", 404)
+    d, changes = body(), {}
+    if "name" in d:
+        if not isinstance(d["name"], str) or not d["name"].strip(): return err("Service name cannot be empty")
+        changes["name"] = d["name"].strip()
+    if "description" in d:
+        if not isinstance(d["description"], str) or not d["description"].strip(): return err("Description cannot be empty")
+        changes["description"] = d["description"].strip()
+    if "price" in d:
+        try: changes["price"] = float(d["price"])
+        except (TypeError, ValueError): return err("Service price must be numeric")
+        if changes["price"] < 0: return err("Service price must not be negative")
+    if "active" in d: changes["active"] = bool(d["active"])
+    if service_id in {key for key in HOME_SERVICES}:
+        item = put("homeServiceCatalog", {**item, **changes})
+    else:
+        item = update("homeServiceCatalog", service_id, **changes)
+    return jsonify(item)
 
 @app.get("/api/inventory")
-@auth("pharmacist", "doctor", "admin")
+@auth("pharmacist", "doctor", "admin", "patient")
 def inventory():
     today = dt.date.today().isoformat()
     return jsonify([{**m, "expired": m["expiry"] < today, "lowStock": m["quantity"] < 20} for m in all_("inventory")])
 
 @app.post("/api/inventory")
-@auth("pharmacist", "admin")
+@auth("pharmacist")
 def add_medicine():
     d = body()
-    if not d.get("name"): return err("name is required")
-    return jsonify(put("inventory", {"id": uid("med"), "name": d["name"], "price": float(d.get("price", 0)),
-                                     "quantity": int(d.get("quantity", 0)), "expiry": d.get("expiry", "2099-12-31")})), 201
+    if not isinstance(d.get("name"), str) or not d["name"].strip(): return err("name is required")
+    try:
+        price, quantity = float(d.get("price", 0)), int(d.get("quantity", 0))
+        expiry = dt.date.fromisoformat(d.get("expiry", "2099-12-31")).isoformat()
+    except (TypeError, ValueError): return err("price, quantity, or expiry is invalid")
+    if price < 0 or quantity < 0: return err("price and quantity must not be negative")
+    return jsonify(put("inventory", {"id": uid("med"), "name": d["name"].strip(), "price": price,
+                                     "quantity": quantity, "expiry": expiry})), 201
 
 @app.patch("/api/inventory/<mid>")
-@auth("pharmacist", "admin")
+@auth("pharmacist")
 def edit_medicine(mid):
     if not get("inventory", mid): return err("Item not found", 404)
-    return jsonify(update("inventory", mid, **{k: v for k, v in body().items() if k in ("name", "price", "quantity", "expiry")}))
+    d = body()
+    changes = {}
+    if "name" in d:
+        if not isinstance(d["name"], str) or not d["name"].strip(): return err("name cannot be empty")
+        changes["name"] = d["name"].strip()
+    if "price" in d:
+        try: changes["price"] = float(d["price"])
+        except (TypeError, ValueError): return err("price must be numeric")
+        if changes["price"] < 0: return err("price must not be negative")
+    if "quantity" in d:
+        try: changes["quantity"] = int(d["quantity"])
+        except (TypeError, ValueError): return err("quantity must be an integer")
+        if changes["quantity"] < 0: return err("quantity must not be negative")
+    if "expiry" in d:
+        try: changes["expiry"] = dt.date.fromisoformat(d["expiry"]).isoformat()
+        except (TypeError, ValueError): return err("expiry must be YYYY-MM-DD")
+    return jsonify(update("inventory", mid, **changes))
 
 @app.get("/api/notifications")
 @auth()
@@ -600,14 +1072,106 @@ EXPORTABLE = ["appointments", "consultations", "prescriptions", "pharmacyOrders"
 @app.get("/api/admin/report")
 @auth("admin")
 def report():
-    paid = [i for i in all_("invoices") if i["status"] == "Paid"]
+    users = all_("users")
+    invoices = all_("invoices")
+    paid = [i for i in invoices if i.get("status") == "Paid"]
     revenue = {}
-    for i in paid: revenue[i["kind"]] = revenue.get(i["kind"], 0) + i["amount"]
+    for invoice in paid:
+        kind = invoice.get("kind", "other")
+        revenue[kind] = revenue.get(kind, 0) + float(invoice.get("amount", 0) or 0)
     by_status = {}
-    for a in all_("appointments"): by_status[a["status"]] = by_status.get(a["status"], 0) + 1
+    for appointment in all_("appointments"):
+        status = appointment.get("status", "Unknown")
+        by_status[status] = by_status.get(status, 0) + 1
+    dashboard = {
+        "patients": sum(u.get("role") == "patient" and u.get("enabled", True) for u in users),
+        "doctors": sum(u.get("role") == "doctor" and u.get("enabled", True) for u in users),
+        "pendingPayments": sum(i.get("status") in ("Unpaid", "Pending") for i in invoices),
+        "paidDeliveries": sum(i.get("kind") == "delivery" for i in paid),
+        "pharmacyOrders": len(all_("pharmacyOrders")),
+        "homeServices": len(all_("homeServices")),
+        "labRequests": len(all_("labRequests")),
+        "revenue": sum(revenue.values()),
+        "financials": {
+            "consultation": {"paid": 0, "revenue": 0},
+            "medicine": {"paid": 0, "revenue": 0},
+            "delivery": {"paid": 0, "revenue": 0},
+            "homeAssessment": {"paid": 0, "revenue": 0},
+            "lab": {"paid": 0, "revenue": 0},
+        },
+    }
+    for invoice in paid:
+        kind = invoice.get("kind", "other")
+        if kind in dashboard["financials"]:
+            summary = dashboard["financials"][kind]
+            summary["paid"] += 1
+            summary["revenue"] += float(invoice.get("amount", 0) or 0)
     return jsonify({"counts": {c: len(all_(c)) for c in ["users"] + EXPORTABLE},
                     "appointmentsByStatus": by_status, "revenueByKind": revenue,
-                    "totalRevenue": sum(revenue.values())})
+                    "totalRevenue": dashboard["revenue"], "dashboard": dashboard})
+
+@app.get("/api/admin/report/data")
+@auth("admin")
+def report_data():
+    report_type = request.args.get("type", "")
+    valid_types = {"financial", "appointments", "pharmacy", "deliveries",
+                   "home-services", "laboratory", "users"}
+    if report_type not in valid_types: return err("Unknown report type")
+    date_from, date_to = request.args.get("from", ""), request.args.get("to", "")
+    if date_from:
+        try: dt.date.fromisoformat(date_from)
+        except ValueError: return err("Invalid from date")
+    if date_to:
+        try: dt.date.fromisoformat(date_to)
+        except ValueError: return err("Invalid to date")
+    if date_from and date_to and date_from > date_to: return err("From date must be on or before to date")
+
+    def in_range(row, field="createdAt"):
+        value = str(row.get(field, row.get("createdAt", "")))[:10]
+        return (not date_from or not value or value >= date_from) and (not date_to or not value or value <= date_to)
+
+    if report_type == "financial":
+        rows = [{"id": i.get("id", ""), "type": i.get("kind", "other"), "patient": (get("users", i.get("patientId", "")) or {}).get("name", "-"),
+                 "total": i.get("amount", 0), "status": i.get("status", ""), "createdAt": i.get("createdAt", "")}
+                for i in all_("invoices") if in_range(i)]
+    elif report_type == "appointments":
+        rows = [{"date": a.get("date", ""), "time": a.get("time", ""),
+                 "patient": (get("users", a.get("patientId", "")) or {}).get("name", "-"),
+                 "doctor": (get("users", a.get("doctorId", "")) or {}).get("name", "-"),
+                 "specialty": a.get("specialty", "-"), "type": a.get("type", "-"), "status": a.get("status", "")}
+                for a in all_("appointments") if in_range(a, "date")]
+    elif report_type == "pharmacy":
+        rows = [{"id": o.get("id", ""), "patient": (get("users", o.get("patientId", "")) or {}).get("name", "-"),
+                 "type": o.get("type", "Prescription"),
+                 "medicines": "; ".join(f"{item.get('medicineName', item.get('name', 'Medicine'))} x{item.get('quantity', 0)}"
+                                        for item in o.get("items", [])),
+                 "status": o.get("status", ""), "createdAt": o.get("createdAt", "")}
+                for o in all_("pharmacyOrders") if in_range(o)]
+    elif report_type == "deliveries":
+        rows = [{"id": d.get("id", ""), "order": d.get("orderId", d.get("pharmacyOrderId", "")),
+                 "patient": (get("users", d.get("patientId", "")) or {}).get("name", "-"),
+                 "rider": (get("users", d.get("riderId", "")) or {}).get("name", "-"),
+                 "location": d.get("deliveryLocation", d.get("deliveryAddress", "-")),
+                 "receiverPhone": d.get("receiverPhone", ""), "fee": d.get("deliveryFee", 0),
+                 "status": d.get("status", ""), "createdAt": d.get("createdAt", "")}
+                for d in all_("deliveries") if in_range(d)]
+    elif report_type == "home-services":
+        rows = [{"id": h.get("id", ""), "patient": (get("users", h.get("patientId", "")) or {}).get("name", "-"),
+                 "service": h.get("service", h.get("serviceName", "Home Service")),
+                 "date": h.get("date", h.get("preferredDate", "")),
+                 "total": h.get("total", h.get("servicePrice", 0)), "status": h.get("status", ""),
+                 "createdAt": h.get("createdAt", "")}
+                for h in all_("homeServices") if in_range(h)]
+    elif report_type == "laboratory":
+        rows = [{"id": l.get("id", ""), "patient": (get("users", l.get("patientId", "")) or {}).get("name", "-"),
+                 "test": l.get("testName", ", ".join(l.get("tests", []))),
+                 "status": l.get("status", ""), "createdAt": l.get("createdAt", "")}
+                for l in all_("labRequests") if in_range(l)]
+    else:
+        rows = [{"name": u.get("name", ""), "email": u.get("email", ""), "role": u.get("role", ""),
+                 "specialty": u.get("specialty", "-"), "status": "Enabled" if u.get("enabled", True) else "Disabled"}
+                for u in all_("users")]
+    return jsonify(rows)
 
 @app.get("/api/admin/export/<col>.csv")
 @auth("admin")
@@ -622,7 +1186,7 @@ def export_csv(col):
 print("Routes registered:", len([r for r in app.url_map.iter_rules() if r.rule.startswith("/api")]))
 if __name__ == "__main__":
     app.run(
-        host=os.environ.get("BEACON_HOST", "127.0.0.1"),
+        host=os.environ.get("BEACON_HOST", "0.0.0.0"),
         port=int(os.environ.get("PORT", "5000")),
         threaded=True,
     )
