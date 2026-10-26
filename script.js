@@ -11861,12 +11861,20 @@ window.renderConsultation = async function(){
 
 function stopSession(){
   const S = V8.session; if(!S) return;
+  if(S.peerConnection && !S.rtcEnded){
+    sendRtcSignal(S,"leave",{}).catch(error=>console.warn("Unable to notify the other participant that the call ended:",error));
+  }
+  S.rtcStopped = true;
   V8.session = null;
   try{ if(S.isDoctor){ flushNotes(S); flushTranscript(S); } }catch(e){}
   S.captionsOn = false;
   try{ S.rec && (S.rec.onend=null, S.rec.stop()); }catch(e){}
   [S.camStream,S.micStream].forEach(s=>{ try{ s && s.getTracks().forEach(t=>t.stop()); }catch(e){} });
-  clearInterval(S.timer); clearInterval(S.presence); clearTimeout(S.noteTimer); clearTimeout(S.trTimer);
+  clearInterval(S.timer); clearInterval(S.presence); clearTimeout(S.noteTimer); clearTimeout(S.trTimer); clearTimeout(S.signalTimer);
+  if(S.peerConnection) S.peerConnection.close();
+  const localVideo = $("v8LocalVideo"), remoteVideo = $("v8RemoteVideo");
+  if(localVideo) localVideo.srcObject = null;
+  if(remoteVideo) remoteVideo.srcObject = null;
   if(consultIntervals && consultIntervals[S.apptId]){ clearInterval(consultIntervals[S.apptId]); delete consultIntervals[S.apptId]; }
 }
 
@@ -11914,7 +11922,7 @@ window.joinConsultation = async function(appointmentId){
   const c = isDoctor ? getOrCreateConsult(a) : consultByAppt(a.id);
   if(isDoctor) saveDB();
   const S = V8.session = {apptId:a.id, a, isDoctor, otherName:other?.name||"the other participant", otherSeen:0, lines:[], speakLang:"en", viewLang:"orig",
-    captionsOn:false, startedAt:Date.now(), translators:{}, lastSaved:0};
+    captionsOn:false, startedAt:Date.now(), translators:{}, lastSaved:0, signalCursor:0, pendingCandidates:[], localCandidates:[], localDescriptionSent:false, rtcStopped:false, rtcEnded:false};
   /* A returning transcript (e.g. doctor re-joins) is restored. */
   if(c && c.transcript && c.transcript.length) S.lines = c.transcript.map(l=>({...l}));
   const hist = isDoctor ? patientHistory(a.patientId,a.id) : [];
@@ -11927,9 +11935,11 @@ window.joinConsultation = async function(appointmentId){
   <div id="v8Status"></div>
   <div class="v8-room">
     <div>
+      <div id="v8RtcStatus" class="alert alert-info">Connecting to the consultation…</div>
       <div class="v8-video" id="v8Video">
-        <div class="v8-remote"><div class="v8-avatar">${esc((other?.name||"?").charAt(0).toUpperCase())}</div><div>${esc(other?.name||"")}</div>
-          <div class="small" style="opacity:.8">${physical?"In-person consultation":"Video / audio connects through the hospital's signalling service in production"}</div></div>
+        <video id="v8RemoteVideo" class="v8-remote-video hidden" autoplay playsinline></video>
+        <div class="v8-remote" id="v8RemotePlaceholder"><div class="v8-avatar">${esc((other?.name||"?").charAt(0).toUpperCase())}</div><div>${esc(other?.name||"")}</div>
+          <div class="small" style="opacity:.8">${physical?"In-person consultation":"Waiting for the other participant to connect…"}</div></div>
         <video id="v8LocalVideo" class="v8-local hidden" autoplay muted playsinline></video>
         <div id="v8CapOverlay" class="v8-overlay hidden"></div>
       </div>
@@ -11974,6 +11984,7 @@ window.joinConsultation = async function(appointmentId){
     </div>
   </div>`;
   V8.wideNext = true; openModal();
+  if(!physical) startRtcConnection(S);
   S.timerRemaining = 45*60;
 
   /* countdown – the doctor's session ends the consultation automatically */
@@ -11985,15 +11996,157 @@ window.joinConsultation = async function(appointmentId){
   },1000);
   consultIntervals[a.id] = S.timer;
 
-  /* presence heartbeat between the two participants */
-  busSend(S,"presence",{}); updatePresence(S);
-  S.presence = setInterval(()=>{ if(!$("v8Transcript")){ stopSession(); return; } busSend(S,"presence",{}); updatePresence(S); },3000);
+  updatePresence(S);
+  S.presence = setInterval(()=>{ if(!$("v8Transcript")){ stopSession(); return; } updatePresence(S); },3000);
 
   S.lines.forEach(l=>renderLine(S,l));
   capNote(S);
   /* start live captions straight away where the browser supports speech recognition */
   if(window.SpeechRecognition||window.webkitSpeechRecognition) v8ToggleCaptions(true);
 };
+
+function rtcStatus(S,message,kind="info"){
+  if(V8.session!==S) return;
+  const el=$("v8RtcStatus");
+  if(el){ el.className=`alert alert-${kind}`; el.textContent=message; }
+}
+
+async function sendRtcSignal(S,type,payload){
+  if(S.rtcStopped) return;
+  return apiRequest(`/appointments/${encodeURIComponent(S.apptId)}/signals`,{
+    method:"POST",
+    body:JSON.stringify({type,payload})
+  });
+}
+
+async function publishRtcDescription(S,type,description){
+  S.localDescriptionSent=false;
+  await S.peerConnection.setLocalDescription(description);
+  await sendRtcSignal(S,type,S.peerConnection.localDescription.toJSON());
+  S.localDescriptionSent=true;
+  const candidates=S.localCandidates.splice(0);
+  for(const candidate of candidates) await sendRtcSignal(S,"candidate",candidate);
+}
+
+async function addRemoteRtcCandidate(S,candidate){
+  if(!S.peerConnection.remoteDescription){
+    S.pendingCandidates.push(candidate);
+    return;
+  }
+  await S.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+}
+
+async function handleRtcSignal(S,message){
+  const pc=S.peerConnection;
+  if(message.type==="offer"){
+    if(S.isDoctor) throw new Error("Received an unexpected WebRTC offer from the patient.");
+    await pc.setRemoteDescription(message.payload);
+    for(const candidate of S.pendingCandidates.splice(0)) await addRemoteRtcCandidate(S,candidate);
+    const answer=await pc.createAnswer();
+    await publishRtcDescription(S,"answer",answer);
+    rtcStatus(S,"Connected to the doctor's session. Establishing the video connection…");
+  }else if(message.type==="answer"){
+    if(!S.isDoctor) throw new Error("Received an unexpected WebRTC answer.");
+    await pc.setRemoteDescription(message.payload);
+    for(const candidate of S.pendingCandidates.splice(0)) await addRemoteRtcCandidate(S,candidate);
+  }else if(message.type==="candidate"){
+    await addRemoteRtcCandidate(S,message.payload);
+  }else if(message.type==="leave"){
+    S.otherSeen=0;
+    updatePresence(S);
+    rtcStatus(S,`${S.otherName} left the call. Waiting for them to rejoin.`,"warning");
+  }else if(message.type==="end"){
+    S.rtcEnded=true;
+    rtcStatus(S,"The doctor ended this consultation.","success");
+    setTimeout(()=>{if(V8.session===S) closeModal();},2500);
+  }
+}
+
+async function pollRtcSignals(S){
+  if(V8.session!==S||S.rtcStopped) return;
+  let delay=1200;
+  try{
+    const result=await apiRequest(`/appointments/${encodeURIComponent(S.apptId)}/signals?after=${S.signalCursor}`);
+    S.signalCursor=result.cursor;
+    S.otherSeen=result.peerOnline?Date.now():0;
+    updatePresence(S);
+    for(const message of result.messages) await handleRtcSignal(S,message);
+    if(result.ended&&!S.isDoctor&&!S.rtcEnded){
+      S.rtcEnded=true;
+      rtcStatus(S,"The doctor ended this consultation.","success");
+      setTimeout(()=>{if(V8.session===S) closeModal();},2500);
+      return;
+    }
+  }catch(error){
+    rtcStatus(S,`Signaling connection failed: ${error.message||"retrying…"}`,"danger");
+    delay=error.status===401||error.status===403||error.status===404||error.status===409?0:3000;
+    if(delay===0) return;
+  }
+  if(V8.session===S&&!S.rtcStopped) S.signalTimer=setTimeout(()=>pollRtcSignals(S),delay);
+}
+
+async function startRtcConnection(S){
+  if(!window.RTCPeerConnection){
+    rtcStatus(S,"This browser does not support WebRTC. Please use a current version of Chrome, Edge, Firefox, or Safari.","danger");
+    return;
+  }
+  try{
+    rtcStatus(S,"Preparing the secure peer-to-peer connection…");
+    const config=await apiRequest(`/appointments/${encodeURIComponent(S.apptId)}/rtc-config`);
+    if(V8.session!==S||S.rtcStopped) return;
+    const pc=S.peerConnection=new RTCPeerConnection({iceServers:config.iceServers,iceCandidatePoolSize:4});
+    S.audioSender=pc.addTransceiver("audio",{direction:"sendrecv"}).sender;
+    S.videoSender=pc.addTransceiver("video",{direction:"sendrecv"}).sender;
+    if(S.micStream?.getAudioTracks()[0]) await S.audioSender.replaceTrack(S.micStream.getAudioTracks()[0]);
+    if(S.camStream?.getVideoTracks()[0]) await S.videoSender.replaceTrack(S.camStream.getVideoTracks()[0]);
+    pc.onicecandidate=event=>{
+      if(!event.candidate) return;
+      const candidate=event.candidate.toJSON();
+      if(!S.localDescriptionSent) S.localCandidates.push(candidate);
+      else sendRtcSignal(S,"candidate",candidate).catch(error=>rtcStatus(S,`Unable to send a network candidate: ${error.message}`,"danger"));
+    };
+    pc.ontrack=event=>{
+      const video=$("v8RemoteVideo"),placeholder=$("v8RemotePlaceholder");
+      if(!video) return;
+      const stream=event.streams[0]||S.remoteStream||new MediaStream();
+      S.remoteStream=stream;
+      if(!event.streams[0]&&!stream.getTracks().includes(event.track)) stream.addTrack(event.track);
+      video.srcObject=stream;
+      video.play().catch(()=>rtcStatus(S,"Allow audio and video playback in your browser.","warning"));
+      if(event.track.kind==="video"){
+        const showVideo=()=>{
+          video.classList.remove("hidden");
+          placeholder?.classList.add("hidden");
+        };
+        event.track.addEventListener("unmute",showVideo,{once:true});
+        event.track.addEventListener("mute",()=>{
+          video.classList.add("hidden");
+          placeholder?.classList.remove("hidden");
+        });
+        if(!event.track.muted) showVideo();
+      }
+    };
+    pc.onconnectionstatechange=()=>{
+      if(pc.connectionState==="connected") rtcStatus(S,"Live video connection established.","success");
+      else if(pc.connectionState==="connecting") rtcStatus(S,"Connecting audio and video…");
+      else if(pc.connectionState==="disconnected") rtcStatus(S,"Connection interrupted. Trying to reconnect…","warning");
+      else if(pc.connectionState==="failed") rtcStatus(S,"Could not connect. A TURN relay may be required; configure BEACON_TURN_URLS, BEACON_TURN_USERNAME, and BEACON_TURN_CREDENTIAL on the server.","danger");
+    };
+    pc.oniceconnectionstatechange=()=>{
+      if(pc.iceConnectionState==="failed") rtcStatus(S,"Network connection failed. Check the TURN relay settings and retry the call.","danger");
+    };
+    pollRtcSignals(S);
+    if(S.isDoctor){
+      const offer=await pc.createOffer();
+      await publishRtcDescription(S,"offer",offer);
+      rtcStatus(S,"Call invitation sent. Waiting for the patient to connect…");
+    }else{
+      rtcStatus(S,"Waiting for the doctor to connect…");
+    }
+  }catch(error){
+    rtcStatus(S,`Unable to start WebRTC: ${error.message||"Please check your connection and retry."}`,"danger");
+  }
+}
 
 function capNote(S,extra){
   const el = $("v8CapNote"); if(!el) return;
@@ -12014,20 +12167,38 @@ window.v8ToggleCam = async function(){
   const S = V8.session; if(!S) return;
   const btn = $("v8CamBtn"), vid = $("v8LocalVideo");
   if(S.camStream){
+    try{ if(S.videoSender) await S.videoSender.replaceTrack(null); }
+    catch(error){ rtcStatus(S,`Unable to stop sending camera video: ${error.message}`,"danger"); return; }
     S.camStream.getTracks().forEach(t=>t.stop()); S.camStream = null;
     vid.srcObject = null; vid.classList.add("hidden"); btn.textContent = "📹 Camera: off"; return;
   }
   try{
     S.camStream = await navigator.mediaDevices.getUserMedia({video:true, audio:false});
+    if(V8.session!==S){ S.camStream.getTracks().forEach(t=>t.stop()); return; }
+    if(S.videoSender) await S.videoSender.replaceTrack(S.camStream.getVideoTracks()[0]);
     vid.srcObject = S.camStream; vid.classList.remove("hidden"); btn.textContent = "📹 Camera: on";
-  }catch(e){ capNote(S,"Camera permission was not granted."); }
+  }catch(e){
+    if(S.camStream){ S.camStream.getTracks().forEach(t=>t.stop()); S.camStream=null; }
+    rtcStatus(S,`Camera could not be started: ${e.message||"permission was not granted."}`,"danger");
+  }
 };
 window.v8ToggleMic = async function(){
   const S = V8.session; if(!S) return;
   const btn = $("v8MicBtn");
-  if(S.micStream){ S.micStream.getTracks().forEach(t=>t.stop()); S.micStream = null; btn.textContent = "🎤 Mic: off"; return; }
-  try{ S.micStream = await navigator.mediaDevices.getUserMedia({audio:true}); btn.textContent = "🎤 Mic: on"; }
-  catch(e){ capNote(S,"Microphone permission was not granted."); }
+  if(S.micStream){
+    try{ if(S.audioSender) await S.audioSender.replaceTrack(null); }
+    catch(error){ rtcStatus(S,`Unable to stop sending microphone audio: ${error.message}`,"danger"); return; }
+    S.micStream.getTracks().forEach(t=>t.stop()); S.micStream = null; btn.textContent = "🎤 Mic: off"; return;
+  }
+  try{
+    S.micStream = await navigator.mediaDevices.getUserMedia({audio:true});
+    if(V8.session!==S){ S.micStream.getTracks().forEach(t=>t.stop()); return; }
+    if(S.audioSender) await S.audioSender.replaceTrack(S.micStream.getAudioTracks()[0]);
+    btn.textContent = "🎤 Mic: on";
+  }catch(e){
+    if(S.micStream){ S.micStream.getTracks().forEach(t=>t.stop()); S.micStream=null; }
+    rtcStatus(S,`Microphone could not be started: ${e.message||"permission was not granted."}`,"danger");
+  }
 };
 window.startCamera = ()=>window.v8ToggleCam();
 window.startMicrophone = ()=>window.v8ToggleMic();
@@ -12210,6 +12381,9 @@ window.endConsultation = async function(appointmentId, autoEnd){
   if(S && S.apptId===appointmentId){
     flushNotes(S,true); flushTranscript(S);
     busSend(S,"end",{});
+    S.rtcEnded=true;
+    try{ await sendRtcSignal(S,"end",{}); }
+    catch(error){ rtcStatus(S,`The video room could not notify the patient that the call ended: ${error.message||"signaling failed."}`,"warning"); }
     minutes = Math.min(45, Math.max(1, Math.ceil((Date.now()-S.startedAt)/60000)));
   }
   const c = getOrCreateConsult(a);

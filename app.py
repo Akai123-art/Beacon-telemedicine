@@ -9,7 +9,7 @@ BEACON_ADMIN_PASSWORD to the recovery password, then remove the reset flag.
 """
 # Cell 2 - imports, config and a small SQLite document store
 import os
-import sqlite3, json, threading, math, secrets, csv, io, datetime as dt
+import sqlite3, json, threading, math, secrets, csv, io, datetime as dt, time
 from pathlib import Path
 from functools import wraps
 from flask import Flask, request, jsonify, g, Response, send_from_directory
@@ -20,7 +20,8 @@ DB_FILE = os.environ.get("BEACON_DB_FILE", str(Path(__file__).resolve().with_nam
 SECRET_KEY = os.environ.get("BEACON_SECRET_KEY") or secrets.token_hex(32)
 ADMIN_PASSWORD = os.environ.get("BEACON_ADMIN_PASSWORD", "Admin@1234")
 RESET_ADMIN_PASSWORD = os.environ.get("BEACON_RESET_ADMIN_PASSWORD", "").lower() in {"1", "true", "yes"}
-LEGACY_ADMIN_PASSWORD = "Demo@1234"
+LEGACY_ADMIN_PASSWORD = ".py" \
+""
 if len(ADMIN_PASSWORD) < 8:
     raise ValueError("BEACON_ADMIN_PASSWORD must be at least 8 characters")
 HOSPITAL = {"name": "Beacon of Hope Hospital", "lat": -1.3998, "lng": 36.7584,
@@ -36,6 +37,9 @@ DELIVERY_BANDS = [(3, 100), (5, 150), (10, 250), (15, 350), (20, 450), (25, 550)
 _lock = threading.RLock()
 _conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 _conn.execute("CREATE TABLE IF NOT EXISTS docs (col TEXT, id TEXT, data TEXT, PRIMARY KEY (col, id))")
+_rtc_signals = {}
+_rtc_signal_ttl = 60 * 60
+_rtc_signal_limit = 256
 
 def uid(prefix): return f"{prefix}_{secrets.token_hex(4)}"
 def now(): return dt.datetime.now().isoformat(timespec="seconds")
@@ -443,6 +447,107 @@ def start_consultation(aid):
                               "clinicalNotes": "", "diagnosis": ""})
     notify(a["patientId"], "Your doctor has started the consultation - please join")
     return jsonify(c)
+
+def rtc_appointment(aid, user, allow_completed=False):
+    appointment = get("appointments", aid)
+    if not appointment or user["id"] not in (appointment.get("patientId"), appointment.get("doctorId")):
+        return None, err("Consultation not found", 404)
+    if appointment.get("type") == "Physical Hospital Visit":
+        return None, err("Video is not available for physical appointments", 409)
+    available_statuses = ("Confirmed", "In Consultation", "Completed") if allow_completed else ("Confirmed", "In Consultation")
+    if appointment.get("status") not in available_statuses:
+        return None, err("Consultation is not available", 409)
+    return appointment, None
+
+def rtc_messages(aid):
+    cutoff = time.time() - _rtc_signal_ttl
+    with _lock:
+        expired = [room_id for room_id, room in _rtc_signals.items() if room["updated"] < cutoff]
+        for room_id in expired:
+            del _rtc_signals[room_id]
+        room = _rtc_signals.setdefault(aid, {"messages": [], "last_seen": {}, "next_id": 1, "updated": time.time()})
+        room["updated"] = time.time()
+        return room
+
+@app.get("/api/appointments/<aid>/rtc-config")
+@auth()
+def rtc_config(aid):
+    appointment, error = rtc_appointment(aid, g.user)
+    if error: return error
+    ice_servers = [{"urls": ["stun:stun.l.google.com:19302"]}]
+    turn_urls = [url.strip() for url in os.environ.get("BEACON_TURN_URLS", "").split(",") if url.strip()]
+    turn_username = os.environ.get("BEACON_TURN_USERNAME", "")
+    turn_credential = os.environ.get("BEACON_TURN_CREDENTIAL", "")
+    if turn_urls and not (turn_username and turn_credential):
+        return err("TURN is configured without both username and credential", 503)
+    if turn_username and turn_credential and not turn_urls:
+        return err("TURN credentials are configured without a TURN URL", 503)
+    if turn_urls:
+        ice_servers.append({"urls": turn_urls, "username": turn_username, "credential": turn_credential})
+    response = jsonify({"iceServers": ice_servers})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+@app.get("/api/appointments/<aid>/signals")
+@auth()
+def get_rtc_signals(aid):
+    appointment, error = rtc_appointment(aid, g.user, allow_completed=True)
+    if error: return error
+    try:
+        cursor = max(0, int(request.args.get("after", "0")))
+    except (TypeError, ValueError):
+        return err("Invalid signaling cursor")
+    with _lock:
+        room = rtc_messages(aid)
+        room["last_seen"][g.user["id"]] = time.time()
+        messages = [message for message in room["messages"]
+                    if message["id"] > cursor and message["from"] != g.user["id"]]
+        latest = room["messages"][-1]["id"] if room["messages"] else cursor
+        other_id = appointment["doctorId"] if g.user["id"] == appointment["patientId"] else appointment["patientId"]
+        peer_online = time.time() - room["last_seen"].get(other_id, 0) < 10
+    response = jsonify({"messages": messages, "cursor": max(cursor, latest),
+                        "peerOnline": peer_online, "ended": appointment["status"] == "Completed"})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+@app.post("/api/appointments/<aid>/signals")
+@auth()
+def post_rtc_signal(aid):
+    appointment, error = rtc_appointment(aid, g.user)
+    if error: return error
+    if appointment.get("status") != "In Consultation":
+        return err("The doctor must start the consultation before signaling", 409)
+    data = body()
+    signal_type = data.get("type")
+    payload = data.get("payload")
+    if signal_type not in ("offer", "answer", "candidate", "leave", "end") or not isinstance(payload, dict):
+        return err("Invalid WebRTC signaling message")
+    if signal_type == "offer" and g.user["id"] != appointment["doctorId"]:
+        return err("Only the doctor can create the WebRTC offer", 403)
+    if signal_type == "answer" and g.user["id"] != appointment["patientId"]:
+        return err("Only the patient can answer the WebRTC offer", 403)
+    if signal_type == "end" and g.user["id"] != appointment["doctorId"]:
+        return err("Only the doctor can end this consultation", 403)
+    if signal_type in ("offer", "answer") and (
+        payload.get("type") != signal_type or not isinstance(payload.get("sdp"), str) or not payload["sdp"]
+    ):
+        return err("Invalid WebRTC session description")
+    if signal_type == "candidate" and not isinstance(payload.get("candidate"), str):
+        return err("Invalid ICE candidate")
+    if len(json.dumps(payload)) > 200_000:
+        return err("WebRTC signaling message is too large", 413)
+    with _lock:
+        room = rtc_messages(aid)
+        if signal_type == "offer":
+            room["messages"].clear()
+        if len(room["messages"]) >= _rtc_signal_limit:
+            return err("Signaling queue is full; leave and rejoin the consultation", 429)
+        message = {"id": room["next_id"],
+                   "from": g.user["id"], "type": signal_type, "payload": payload}
+        room["next_id"] += 1
+        room["messages"].append(message)
+        room["updated"] = time.time()
+    return jsonify({"id": message["id"]}), 201
 
 @app.post("/api/appointments/<aid>/end")
 @auth("doctor")
