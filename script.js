@@ -8813,14 +8813,6 @@ function createRefillRequest(e){
   closeModal();alert("Refill request submitted. You will be notified when the pharmacy invoice is ready.");navigate("pharmacy");
 }
 
-function renderPatientDashboard(){
-  /* keep the existing dashboard style but add the refill action */
-  if(typeof originalRenderPatientDashboard==="function") originalRenderPatientDashboard();
-  const content=document.getElementById("content");
-  if(currentUser.role!=="patient") return;
-  const card=document.createElement("div"); card.className="card"; card.innerHTML=`<h3>Medicine Refill</h3><p class="text-muted">For ongoing NCD medicines such as diabetes or hypertension treatment. No consultation is required.</p><button class="btn btn-primary" onclick="showRefillForm()">💊 Request NCD Refill</button>`; content.appendChild(card);
-}
-
 /* Clinical notes are saved during the consultation and are visible to the doctor/patient in the consultation record. */
 function joinConsultation(appointmentId){
   const a=db.appointments.find(x=>x.id===appointmentId); if(!a||a.status!=="Confirmed"){alert("This consultation has not been confirmed.");return;}
@@ -12805,6 +12797,39 @@ async function refreshBackendInvoices(){
   saveDB();
   return remote;
 }
+
+const localRenderPatientDashboard=window.renderPatientDashboard;
+window.renderPatientDashboard=function(){
+  if(currentUser?.role!=="patient"){
+    localRenderPatientDashboard();
+    return;
+  }
+  const patientId=currentUser.id;
+  const content=document.getElementById("content");
+  if(content) content.innerHTML='<h1 class="page-title">Patient Dashboard</h1><div class="card">Loading your latest invoices...</div>';
+
+  const render=()=>{
+    if(currentUser?.id!==patientId||currentPage!=="dashboard") return;
+    localRenderPatientDashboard();
+    const card=document.createElement("div");
+    card.className="card";
+    card.innerHTML=`<h3>Medicine Refill</h3><p class="text-muted">For ongoing NCD medicines such as diabetes or hypertension treatment. No consultation is required.</p><button class="btn btn-primary" onclick="showRefillForm()">💊 Request NCD Refill</button>`;
+    document.getElementById("content")?.appendChild(card);
+  };
+
+  refreshBackendInvoices().then(render).catch(error=>{
+    if(currentUser?.id!==patientId||currentPage!=="dashboard") return;
+    console.error("Unable to refresh patient invoices:",error);
+    render();
+    if(content){
+      const notice=document.createElement("div");
+      notice.className="alert alert-danger";
+      notice.textContent=`Unable to refresh invoices: ${error.message||"Please try again."}`;
+      content.insertBefore(notice,content.firstChild);
+    }
+  });
+};
+renderPatientDashboard=window.renderPatientDashboard;
 
 async function refreshBackendPrescriptions(){
   if(!["patient","doctor","pharmacist","admin"].includes(currentUser?.role)) return [];

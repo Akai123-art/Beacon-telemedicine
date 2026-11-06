@@ -78,6 +78,11 @@ including the order, medicine items, receiver contact, and confirmed directions.
 The rider then records pickup, confirms the receiver's location by phone, starts
 transit, and completes delivery with the patient's delivery code.
 
+When the pharmacist confirms delivery details, the backend creates or updates
+the delivery invoice on the patient's account. The patient dashboard refreshes
+the unpaid-invoice count from the server; patients can open **Invoices &
+Payments** to review and pay the delivery fee.
+
 For a one-time administrator password recovery, set
 `BEACON_RESET_ADMIN_PASSWORD=1` and `BEACON_ADMIN_PASSWORD` in Render, restart
 the service, then remove `BEACON_RESET_ADMIN_PASSWORD` so it cannot reset the
