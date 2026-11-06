@@ -39,7 +39,7 @@ _conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 _conn.execute("CREATE TABLE IF NOT EXISTS docs (col TEXT, id TEXT, data TEXT, PRIMARY KEY (col, id))")
 _rtc_signals = {}
 _rtc_signal_ttl = 60 * 60
-_rtc_signal_limit = 256
+_rtc_signal_limit = 2048
 
 def uid(prefix): return f"{prefix}_{secrets.token_hex(4)}"
 def now(): return dt.datetime.now().isoformat(timespec="seconds")
@@ -253,6 +253,12 @@ def list_users():
     role = request.args.get("role")
     return jsonify([public(u) for u in all_("users") if not role or u["role"] == role])
 
+@app.get("/api/riders")
+@auth("pharmacist")
+def list_enabled_riders():
+    return jsonify([public(rider) for rider in all_("users", role="rider")
+                    if rider.get("enabled", True)])
+
 @app.get("/api/patients/search")
 @auth("doctor")
 def search_patients():
@@ -267,7 +273,7 @@ def search_patients():
                for field in ("id", "name", "phone", "email"))
     ]
     matches.sort(key=lambda patient: patient["name"].casefold())
-    return jsonify(matches[:25])
+    return jsonify(matches)
 
 @app.post("/api/users")
 @auth("admin")
@@ -520,7 +526,7 @@ def post_rtc_signal(aid):
     data = body()
     signal_type = data.get("type")
     payload = data.get("payload")
-    if signal_type not in ("offer", "answer", "candidate", "leave", "end") or not isinstance(payload, dict):
+    if signal_type not in ("offer", "answer", "candidate", "caption", "leave", "end") or not isinstance(payload, dict):
         return err("Invalid WebRTC signaling message")
     if signal_type == "offer" and g.user["id"] != appointment["doctorId"]:
         return err("Only the doctor can create the WebRTC offer", 403)
@@ -534,6 +540,18 @@ def post_rtc_signal(aid):
         return err("Invalid WebRTC session description")
     if signal_type == "candidate" and not isinstance(payload.get("candidate"), str):
         return err("Invalid ICE candidate")
+    if signal_type == "caption":
+        caption_id, text = payload.get("id"), payload.get("text")
+        if not isinstance(caption_id, str) or not caption_id or len(caption_id) > 100:
+            return err("Invalid caption identifier")
+        if not isinstance(text, str) or not text.strip() or len(text) > 1000:
+            return err("Caption text must contain 1 to 1000 characters")
+        language = payload.get("lang", "en")
+        if language not in ("en", "sw", "fr", "ar", "hi"):
+            language = "en"
+        payload = {"id": caption_id, "at": str(payload.get("at") or now()),
+                   "speakerId": g.user["id"], "speakerName": g.user["name"],
+                   "role": g.user["role"], "lang": language, "text": text.strip()}
     if len(json.dumps(payload)) > 200_000:
         return err("WebRTC signaling message is too large", 413)
     with _lock:
@@ -710,7 +728,7 @@ def set_delivery(oid):
         receiver_phone = str(d.get("receiverPhone", "")).strip()
         try: fee = float(d["fee"])
         except (TypeError, ValueError): return err("Delivery fee must be numeric")
-        if not address or not directions or not receiver_phone or fee < 0:
+        if not address or not directions or not receiver_phone or not math.isfinite(fee) or fee < 0:
             return err("Address, directions, receiver phone and a non-negative fee are required")
         km, quotation = None, False
     else:
@@ -720,22 +738,30 @@ def set_delivery(oid):
         fee, quotation = delivery_fee(km)
         address, directions, receiver_phone = str(d.get("address", "")).strip(), "", ""
 
-    delivery = next((row for row in all_("deliveries") if row.get("orderId", row.get("pharmacyOrderId")) == oid), None)
+    delivery = next((row for row in all_("deliveries")
+                     if row.get("orderId") == oid or row.get("pharmacyOrderId") == oid), None)
+    if delivery and delivery.get("riderId"):
+        return err("Delivery details cannot be changed after rider assignment", 409)
+    invoices = [invoice for invoice in all_("invoices", refId=oid)
+                if invoice.get("kind") == "delivery"]
+    if any(invoice.get("status") == "Paid" for invoice in invoices):
+        return err("The delivery fee is already paid; delivery details can no longer be changed", 409)
     delivery_fields = {
-        "orderId": oid, "pharmacyOrderId": oid, "patientId": o["patientId"], "riderId": None,
+        "orderId": oid, "pharmacyOrderId": oid, "patientId": o["patientId"],
         "status": "Awaiting Delivery Payment", "deliveryLocation": address, "deliveryAddress": address,
         "directions": directions, "receiverPhone": receiver_phone, "deliveryFee": fee,
-        "deliveryKm": km, "quotation": quotation, "updatedAt": now(),
+        "deliveryKm": km, "quotation": quotation, "detailsConfirmedAt": now(), "updatedAt": now(),
     }
     delivery = update("deliveries", delivery["id"], **delivery_fields) if delivery else put(
         "deliveries", {"id": uid("dlv"), **delivery_fields, "otp": f"{secrets.randbelow(10000):04d}",
                        "createdAt": now()})
-    pending_invoice = next((invoice for invoice in all_("invoices", refId=oid)
-                            if invoice.get("kind") == "delivery" and invoice.get("status") != "Paid"), None)
+    pending_invoice = next((invoice for invoice in invoices
+                            if invoice.get("status") != "Paid"), None)
     inv = update("invoices", pending_invoice["id"], amount=fee, description="Medicine delivery") if pending_invoice else \
         make_invoice(o["patientId"], "delivery", oid, fee, "Medicine delivery")
+    delivery = update("deliveries", delivery["id"], deliveryInvoiceId=inv["id"])
     update("pharmacyOrders", oid, status="Awaiting Delivery Payment", deliveryId=delivery["id"],
-           deliveryFee=fee, deliveryAddress=address)
+           deliveryFee=fee, deliveryAddress=address, deliveryPaymentStatus="Pending")
     notify(o["patientId"], f"Delivery details confirmed. Delivery fee: KES {fee}.")
     return jsonify({"delivery": view_delivery(delivery), "invoice": inv, "distanceKm": km, "fee": fee,
                     "quotation": quotation})
@@ -757,6 +783,8 @@ def after_payment(inv):
                                "patientId": o["patientId"], "riderId": None,
                                "otp": f"{secrets.randbelow(10000):04d}",
                                "status": "Awaiting Delivery Details", "createdAt": now()})
+        for pharmacist in all_("users", role="pharmacist", enabled=True):
+            notify(pharmacist["id"], f"Medicine payment received for order {ref} - confirm delivery details")
     elif k == "delivery":
         o = update("pharmacyOrders", ref, status="Paid - Awaiting Dispatch")
         delivery = next((d for d in all_("deliveries")
@@ -816,15 +844,33 @@ def view_delivery(dv):
     order_id = d.get("orderId", d.get("pharmacyOrderId", ""))
     d["orderId"] = order_id
     d["pharmacyOrderId"] = order_id
-    d.setdefault("deliveryLocation", d.get("deliveryAddress", ""))
+    d["deliveryLocation"] = d.get("deliveryLocation") or d.get("deliveryAddress", "")
     order = get("pharmacyOrders", order_id) if order_id else None
-    if order:
-        d.setdefault("deliveryLocation", order.get("deliveryAddress", ""))
-        d.setdefault("deliveryFee", order.get("deliveryFee"))
+    if order and not d["deliveryLocation"]:
+        d["deliveryLocation"] = order.get("deliveryAddress", "")
+    patient = get("users", d.get("patientId", ""))
+    d["receiverName"] = patient.get("name", "Patient") if patient else "Patient"
+    d["receiverPhone"] = d.get("receiverPhone") or (patient.get("phone", "") if patient else "")
+    if g.user["role"] == "rider" and order:
+        d["medicineItems"] = [
+            {"name": item.get("medicineName", item.get("name", "Medicine")),
+             "quantity": item.get("quantity", 0)}
+            for item in order.get("items", [])
+        ]
     invoice = next((row for row in all_("invoices")
                     if row.get("kind") == "delivery" and row.get("refId") == order_id), None)
+    if d.get("deliveryFee") is None:
+        d["deliveryFee"] = (
+            order.get("deliveryFee") if order and order.get("deliveryFee") is not None
+            else invoice.get("amount") if invoice else None
+        )
     d["deliveryPaymentStatus"] = "Paid" if invoice and invoice.get("status") == "Paid" else \
         "Pending" if invoice else "Not invoiced"
+    if (invoice and invoice.get("status") == "Paid"
+            and d.get("status") in {"Awaiting Delivery Details", "Awaiting Delivery Payment",
+                                    "Paid - Awaiting Pharmacist Dispatch",
+                                    "Paid - Ready for Pharmacy Dispatch", "Ready for Admin Dispatch"}):
+        d["status"] = "Paid - Awaiting Dispatch"
     if d.get("status") == "Picked Up - Call Receiver":
         d["status"] = "Picked Up - Confirm Patient Location"
     if g.user["role"] != "patient": d.pop("otp", None)      # only the patient sees the OTP
@@ -842,7 +888,15 @@ def set_delivery_status(did, status, **extra):
     dv = update("deliveries", did, status=status, **extra)
     order_id = dv.get("orderId", dv.get("pharmacyOrderId", ""))
     if order_id and get("pharmacyOrders", order_id):
-        update("pharmacyOrders", order_id, status=status)
+        order_changes = {"status": status}
+        if status == "Assigned":
+            order_changes.update(
+                deliveryId=did,
+                riderId=dv.get("riderId"),
+                dispatchedAt=now(),
+                deliveryPaymentStatus="Paid",
+            )
+        update("pharmacyOrders", order_id, **order_changes)
     notify(dv["patientId"], f"Your delivery is now: {status}")
     return dv
 
@@ -852,9 +906,32 @@ def assign_rider(did):
     dv, rider = get("deliveries", did), get("users", body().get("riderId", ""))
     if not dv: return err("Delivery not found", 404)
     if not rider or rider["role"] != "rider" or not rider.get("enabled", True): return err("Choose a valid enabled rider")
-    if dv["status"] != "Paid - Awaiting Dispatch": return err(f"Delivery is '{dv['status']}'", 409)
-    notify(rider["id"], f"New delivery assigned: {did}")
-    return jsonify(view_delivery(set_delivery_status(did, "Assigned", riderId=rider["id"])))
+    order_id = dv.get("orderId", dv.get("pharmacyOrderId", ""))
+    invoice = next((row for row in all_("invoices")
+                    if row.get("kind") == "delivery" and row.get("refId") == order_id), None)
+    if not invoice or invoice.get("status") != "Paid":
+        return err("The delivery fee must be paid before rider assignment", 409)
+    order = get("pharmacyOrders", order_id)
+    if not order:
+        return err("Pharmacy order not found", 404)
+    try:
+        fee = float(dv.get("deliveryFee"))
+    except (TypeError, ValueError):
+        return err("Confirm the delivery details before rider assignment", 409)
+    if (not math.isfinite(fee) or fee < 0
+            or not str(dv.get("deliveryLocation") or dv.get("deliveryAddress") or "").strip()
+            or not str(dv.get("directions") or "").strip()
+            or not str(dv.get("receiverPhone") or "").strip()):
+        return err("Confirm the delivery details before rider assignment", 409)
+    if dv.get("riderId") or dv.get("status") not in {
+        "Paid - Awaiting Dispatch", "Paid - Awaiting Pharmacist Dispatch",
+        "Paid - Ready for Pharmacy Dispatch", "Ready for Admin Dispatch",
+        "Awaiting Delivery Details", "Awaiting Delivery Payment",
+    }:
+        return err(f"Delivery is '{dv['status']}' and cannot be assigned", 409)
+    assigned = set_delivery_status(did, "Assigned", riderId=rider["id"])
+    notify(rider["id"], f"New medicine delivery assigned for order {order_id}")
+    return jsonify(view_delivery(assigned))
 
 def rider_step(did, expected, new_status):
     dv = get("deliveries", did)

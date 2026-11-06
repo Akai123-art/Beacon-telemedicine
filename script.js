@@ -8889,10 +8889,16 @@ async function renderPharmacy(){
   saveDB();
   const orders=currentUser.role==="patient"?db.pharmacyOrders.filter(o=>o.patientId===currentUser.id):db.pharmacyOrders;
   document.getElementById("content").innerHTML=`
-    <h1 class="page-title">Pharmacy Orders</h1>
+    <h1 class="page-title">
+      Pharmacy Orders
+      ${currentUser.role === "pharmacist"
+        ? `<button class="btn btn-secondary" onclick="renderPharmacy()">↻ Refresh Orders</button>`
+        : ""}
+    </h1>
     ${currentUser.role==="patient"?`
       <div class="alert alert-info">After medicine payment, the pharmacist will call you to confirm the delivery location, directions and delivery fee. The delivery fee will then appear as a separate invoice.</div>
-      <button class="btn btn-primary" onclick="showRefillForm()">💊 Request NCD Medicine Refill</button>`:currentUser.role==="pharmacist"?``:''}
+    <button class="btn btn-primary" onclick="showRefillForm()">💊 Request NCD Medicine Refill</button>`:currentUser.role==="pharmacist"?`
+    <div class="alert alert-info"><strong>Pharmacy workflow:</strong> Check stock and create the medicine invoice → patient pays → confirm delivery details and fee → patient pays the delivery fee → dispatch and assign a rider.</div>`:''}
     <div class="card"><div class="table-wrap"><table><thead><tr><th>Order</th><th>Patient</th><th>Type</th><th>Medicines</th><th>Status</th><th>Delivery Details</th><th>Action</th></tr></thead><tbody>
     ${orders.length?orders.map(o=>{
       const p=getUser(o.patientId);
@@ -8903,10 +8909,20 @@ async function renderPharmacy(){
         String(delivery.deliveryLocation||"").trim() &&
         String(delivery.directions||"").trim() &&
         Number(delivery.deliveryFee||0)>0;
+      const deliveryFeePaid = delivery && (
+        delivery.deliveryPaymentStatus === "Paid" ||
+        delivery.status.includes("Paid") ||
+        (dinv && dinv.status === "Paid")
+      );
       const pharmacistNeedsDeliveryDetails=currentUser.role==="pharmacist" &&
         delivery &&
+        !deliveryFeePaid &&
         !deliveryDetailsComplete &&
-        !["Paid - Awaiting Dispatch","Ready for Admin Dispatch","Dispatched","Assigned","Picked Up","In Transit","Delivered"].includes(delivery.status);
+        !["Paid - Awaiting Dispatch","Paid - Awaiting Pharmacist Dispatch","Ready for Admin Dispatch","Dispatched","Assigned","Picked Up","In Transit","Delivered"].includes(delivery.status);
+      const pharmacistCanAssignRider = currentUser.role==="pharmacist" && delivery && (
+        deliveryFeePaid ||
+        ["Paid - Awaiting Dispatch","Paid - Awaiting Pharmacist Dispatch","Ready for Admin Dispatch"].includes(delivery.status)
+      );
       return `<tr>
         <td>${escapeHTML(o.id)}</td>
         <td>${escapeHTML(p?.name||'-')}</td>
@@ -8919,7 +8935,7 @@ async function renderPharmacy(){
           ${currentUser.role==="patient"&&o.status==="Awaiting Pharmacy Payment"&&inv?`<button class="btn btn-success" onclick="payRelatedInvoice('${inv.id}'); return false;">Pay Medicine</button>`:''}
           ${pharmacistNeedsDeliveryDetails?`<button class="btn btn-primary" onclick="showDeliveryDetailsForm('${delivery.id}')">📍 Confirm Delivery Details</button>`:''}
           ${currentUser.role==="patient"&&delivery&&delivery.status==="Awaiting Delivery Payment"&&dinv?`<button class="btn btn-warning" onclick="payRelatedInvoice('${dinv.id}'); return false;">Pay Delivery Fee</button>`:''}
-          ${currentUser.role==="pharmacist"&&delivery&&delivery.status==="Paid - Awaiting Dispatch"?`<button class="btn btn-success" onclick="pharmacistDispatch('${o.id}')">Assign Rider & Dispatch</button>`:''}
+          ${pharmacistCanAssignRider?`<button class="btn btn-success" onclick="pharmacistDispatch('${o.id}')">Assign Rider & Dispatch</button>`:''}
         </td>
       </tr>`;
     }).join(''):`<tr><td colspan="7"><div class="empty">No pharmacy orders.</div></td></tr>`}
@@ -9876,21 +9892,28 @@ function trackDelivery(){ alert("Live GPS tracking is not used. The rider confir
 (function(){
 
   function deliveryForOrder(orderId){
-    return db.deliveries.find(d => d.pharmacyOrderId === orderId);
+    return db.deliveries.find(d =>
+      (d.pharmacyOrderId || d.orderId) === orderId
+    );
   }
 
   function pharmacyInvoice(orderId){
-    return db.invoices.find(i =>
+    const matches = db.invoices.filter(i =>
       i.type === "Pharmacy" &&
-      i.pharmacyOrderId === orderId
+      (i.pharmacyOrderId || (i.kind === "medicine" ? i.refId : null)) === orderId
     );
+    return matches.find(i => i.fromApi) || matches[0];
   }
 
   function deliveryInvoice(deliveryId){
-    return db.invoices.find(i =>
-      i.type === "Delivery" &&
-      i.deliveryId === deliveryId
+    const delivery = db.deliveries.find(d => d.id === deliveryId);
+    const orderId = delivery?.pharmacyOrderId || delivery?.orderId;
+    const matches = db.invoices.filter(i =>
+      (i.type === "Delivery" || i.kind === "delivery") &&
+      (i.deliveryId === deliveryId ||
+       (orderId && (i.pharmacyOrderId || i.refId) === orderId))
     );
+    return matches.find(i => i.fromApi) || matches[0];
   }
 
   function statusClass(status){
@@ -10169,7 +10192,7 @@ function trackDelivery(){ alert("Live GPS tracking is not used. The rider confir
 
   /* ---------- Pharmacist: dispatch + rider assignment ---------- */
 
-  window.pharmacistDispatch = function(orderId){
+  window.pharmacistDispatch = async function(orderId){
     if(currentUser?.role !== "pharmacist"){
       alert("Only the pharmacist can dispatch medicine.");
       return;
@@ -10183,13 +10206,34 @@ function trackDelivery(){ alert("Live GPS tracking is not used. The rider confir
       return;
     }
 
-    if(d.deliveryPaymentStatus !== "Paid" ||
-       d.status !== "Paid - Ready for Pharmacy Dispatch"){
+    const deliveryInvoicePaid = db.invoices.some(invoice =>
+      (invoice.kind === "delivery" || invoice.type === "Delivery") &&
+      (invoice.refId === orderId || invoice.pharmacyOrderId === orderId) &&
+      invoice.status === "Paid"
+    );
+    const deliveryPaid = d.deliveryPaymentStatus === "Paid" || deliveryInvoicePaid;
+    const deliveryDetailsComplete =
+      String(d.deliveryLocation || d.deliveryAddress || "").trim() &&
+      String(d.directions || "").trim() &&
+      String(d.receiverPhone || "").trim() &&
+      d.deliveryFee != null &&
+      Number.isFinite(Number(d.deliveryFee)) &&
+      Number(d.deliveryFee) >= 0;
+    if(!deliveryPaid || !deliveryDetailsComplete || d.riderId ||
+       !["Paid - Ready for Pharmacy Dispatch", "Paid - Awaiting Dispatch",
+         "Paid - Awaiting Pharmacist Dispatch", "Ready for Admin Dispatch",
+         "Awaiting Delivery Payment", "Awaiting Delivery Details"].includes(d.status)){
       alert("The delivery fee must be PAID before dispatch.");
       return;
     }
 
-    const riders = db.users.filter(u => u.role === "rider" && u.enabled);
+    let riders;
+    try{
+      riders = (await apiRequest("/riders")).map(cacheBackendUser);
+    }catch(error){
+      alert(`Unable to load enabled riders: ${error.message||"Please try again."}`);
+      return;
+    }
 
     if(!riders.length){
       alert("No enabled rider is available.");
@@ -10213,7 +10257,7 @@ function trackDelivery(){ alert("Live GPS tracking is not used. The rider confir
 
       <div class="form-group">
         <label>Select Rider</label>
-        <select id="finalDispatchRider" class="form-control" required>
+        <select id="dispatchRider" class="form-control" required>
           <option value="">Select rider</option>
           ${riders.map(r => `
             <option value="${r.id}">
@@ -10229,7 +10273,7 @@ function trackDelivery(){ alert("Live GPS tracking is not used. The rider confir
       </div>
 
       <div class="flex">
-        <button class="btn btn-success" onclick="confirmFinalDispatch('${orderId}')">
+        <button class="btn btn-success" onclick="confirmPharmacyDispatch('${orderId}')">
           Dispatch & Assign Rider
         </button>
         <button class="btn btn-secondary" onclick="closeModal()">
@@ -10401,13 +10445,18 @@ function trackDelivery(){ alert("Live GPS tracking is not used. The rider confir
       : db.pharmacyOrders;
 
     document.getElementById("content").innerHTML = `
-      <h1 class="page-title">Pharmacy Orders</h1>
+      <h1 class="page-title">
+        Pharmacy Orders
+        ${currentUser.role === "pharmacist"
+          ? `<button class="btn btn-secondary" onclick="renderPharmacy()">↻ Refresh Orders</button>`
+          : ""}
+      </h1>
 
       ${currentUser.role === "pharmacist" ? `
         <div class="alert alert-info">
           <strong>Medicine Delivery Workflow:</strong><br>
           Medicine payment → pharmacist confirms location & fee → delivery invoice →
-          delivery payment → pharmacy dispatches & assigns rider → rider calls receiver →
+          patient pays the delivery invoice → pharmacist refreshes orders and dispatches & assigns a rider → rider calls receiver →
           delivery starts.
         </div>
       ` : ""}
@@ -10440,21 +10489,35 @@ function trackDelivery(){ alert("Live GPS tracking is not used. The rider confir
                 const deliveryPaid =
                   d?.deliveryPaymentStatus === "Paid" ||
                   dinv?.status === "Paid";
+                const deliveryDetailsComplete = Boolean(
+                  d &&
+                  String(d.deliveryLocation || d.deliveryAddress || "").trim() &&
+                  String(d.directions || "").trim() &&
+                  String(d.receiverPhone || "").trim() &&
+                  d.deliveryFee != null &&
+                  Number.isFinite(Number(d.deliveryFee)) &&
+                  Number(d.deliveryFee) >= 0
+                );
 
                 let action = "";
 
                 if(currentUser.role === "pharmacist"){
                   if(order.status === "Pending"){
                     action = `<button class="btn btn-primary"
-                      onclick="processPharmacyOrder('${order.id}')">Check Stock</button>`;
-                  }else if(medicinePaid && d && d.status === "Awaiting Delivery Details"){
+                      onclick="processPharmacyOrder('${order.id}')">Check Stock & Create Invoice</button>`;
+                  }else if(medicinePaid && d && !deliveryDetailsComplete){
                     action = `<button class="btn btn-primary"
-                      onclick="showDeliveryDetailsForm('${d.id}')">📞 Confirm Delivery Details</button>`;
-                  }else if(d && d.status === "Awaiting Delivery Payment" && !deliveryPaid){
-                    action = `<span class="small text-muted">Waiting for patient delivery payment</span>`;
-                  }else if(d && deliveryPaid && d.status === "Paid - Ready for Pharmacy Dispatch"){
+                      onclick="showDeliveryDetailsForm('${d.id}')">📍 Confirm Delivery Details</button>`;
+                  }else if(d && !deliveryPaid &&
+                           ["Awaiting Delivery Payment", "Awaiting Delivery Details"].includes(d.status)){
+                    action = `<span class="small text-muted">Waiting for patient to pay ${money(d.deliveryFee || dinv?.total || 0)} delivery fee</span>`;
+                  }else if(d && deliveryPaid && deliveryDetailsComplete &&
+                           !d.riderId &&
+                           ["Paid - Ready for Pharmacy Dispatch", "Paid - Awaiting Dispatch",
+                            "Paid - Awaiting Pharmacist Dispatch", "Ready for Admin Dispatch",
+                            "Awaiting Delivery Payment", "Awaiting Delivery Details"].includes(d.status)){
                     action = `<button class="btn btn-success"
-                      onclick="pharmacistDispatch('${order.id}')">🚚 Dispatch & Assign Rider</button>`;
+                      onclick="pharmacistDispatch('${order.id}')">🚚 Assign Rider & Dispatch</button>`;
                   }else if(d && d.status === "Assigned"){
                     action = `<span class="badge badge-info">Rider Assigned</span>`;
                   }else if(d && d.status === "Picked Up - Call Receiver"){
@@ -10478,11 +10541,12 @@ function trackDelivery(){ alert("Live GPS tracking is not used. The rider confir
                   }
                 }
 
+                const recordedDeliveryFee = d?.deliveryFee ?? dinv?.total ?? order.deliveryFee;
                 const deliveryText = d
                   ? (d.status === "Awaiting Delivery Details"
                       ? "Waiting for pharmacy to confirm location"
-                      : d.status === "Awaiting Delivery Payment"
-                      ? `Invoice sent — ${money(d.deliveryFee)}`
+                      : recordedDeliveryFee != null
+                      ? `${money(recordedDeliveryFee)} — ${d.status}`
                       : d.status)
                   : "Not started";
 
@@ -10573,7 +10637,7 @@ function trackDelivery(){ alert("Live GPS tracking is not used. The rider confir
                   if(d.status === "Assigned"){
                     action = `<button class="btn btn-primary"
                       onclick="riderPickUpMedicine('${d.id}')">📦 Pick Up Medicine</button>`;
-                  }else if(d.status === "Picked Up - Call Receiver"){
+                  }else if(["Picked Up - Call Receiver", "Picked Up - Confirm Patient Location"].includes(d.status)){
                     action = `
                       <button class="btn btn-primary"
                         onclick="riderConfirmPatientLocation('${d.id}')">
@@ -10597,8 +10661,15 @@ function trackDelivery(){ alert("Live GPS tracking is not used. The rider confir
 
                 return `
                   <tr>
-                    <td>${escapeHTML(d.pharmacyOrderId || d.id)}</td>
-                    <td>${escapeHTML(patient?.name || "-")}</td>
+                    <td>
+                      ${escapeHTML(d.pharmacyOrderId || d.id)}
+                      ${currentUser.role === "rider" && d.medicineItems?.length
+                        ? `<div class="small text-muted">${d.medicineItems.map(item =>
+                            `${escapeHTML(item.name || "Medicine")} × ${escapeHTML(item.quantity)}`
+                          ).join("<br>")}</div>`
+                        : ""}
+                    </td>
+                    <td>${escapeHTML(d.receiverName || patient?.name || "-")}</td>
                     <td>${phone
                       ? `<a href="tel:${escapeHTML(phone)}">${escapeHTML(phone)}</a>`
                       : "-"}</td>
@@ -10652,7 +10723,7 @@ function trackDelivery(){ alert("Live GPS tracking is not used. The rider confir
           </div>
           <div class="stat-card">
             <div class="stat-title">Picked Up / Call Receiver</div>
-            <div class="stat-number">${mine.filter(d => d.status === "Picked Up - Call Receiver").length}</div>
+            <div class="stat-number">${mine.filter(d => ["Picked Up - Call Receiver", "Picked Up - Confirm Patient Location"].includes(d.status)).length}</div>
           </div>
           <div class="stat-card">
             <div class="stat-title">In Transit</div>
@@ -10665,18 +10736,26 @@ function trackDelivery(){ alert("Live GPS tracking is not used. The rider confir
         </div>
 
         <div class="card">
-          <h3>Assigned Medicine Deliveries</h3>
-          ${mine.length ? mine.map(d => {
-            const p = getUser(d.patientId);
-            const phone = d.receiverPhone || p?.phone || "";
+            <div class="flex space-between">
+              <h3>My Assigned Medicine Deliveries</h3>
+              <button class="btn btn-secondary" onclick="renderRiderDashboard()">↻ Refresh Assignments</button>
+            </div>
+            ${mine.length ? mine.map(d => {
+              const p = getUser(d.patientId);
+              const receiverName = d.receiverName || p?.name || "Patient";
+              const phone = d.receiverPhone || p?.phone || "";
+              const medicineItems = (d.medicineItems || []).map(item =>
+                `${escapeHTML(item.name || "Medicine")} × ${escapeHTML(item.quantity)}`
+              ).join("<br>");
 
-            return `
-              <div class="card" style="margin-top:12px">
-                <strong>Order:</strong> ${escapeHTML(d.pharmacyOrderId || d.id)}<br>
-                <strong>Receiver:</strong> ${escapeHTML(p?.name || "-")}<br>
-                <strong>Phone:</strong>
-                ${phone ? `<a href="tel:${escapeHTML(phone)}">${escapeHTML(phone)}</a>` : "-"}<br>
-                <strong>Location:</strong> ${escapeHTML(d.deliveryLocation || "-")}<br>
+              return `
+                <div class="card" style="margin-top:12px">
+                  <strong>Order:</strong> ${escapeHTML(d.pharmacyOrderId || d.id)}<br>
+                  <strong>Receiver:</strong> ${escapeHTML(receiverName)}<br>
+                  ${medicineItems ? `<strong>Medicine:</strong><br>${medicineItems}<br>` : ""}
+                  <strong>Phone:</strong>
+                  ${phone ? `<a href="tel:${escapeHTML(phone)}">${escapeHTML(phone)}</a>` : "-"}<br>
+                  <strong>Location:</strong> ${escapeHTML(d.deliveryLocation || "-")}<br>
                 <strong>Directions:</strong> ${escapeHTML(d.directions || "-")}<br>
                 <strong>Status:</strong>
                 <span class="badge ${statusClass(d.status)}">${escapeHTML(d.status || "-")}</span>
@@ -10686,7 +10765,7 @@ function trackDelivery(){ alert("Live GPS tracking is not used. The rider confir
                     ? `<button class="btn btn-primary"
                         onclick="riderPickUpMedicine('${d.id}')">📦 Pick Up Medicine</button>`
                     : ""}
-                  ${d.status === "Picked Up - Call Receiver"
+                  ${["Picked Up - Call Receiver", "Picked Up - Confirm Patient Location"].includes(d.status)
                     ? `<button class="btn btn-primary"
                         onclick="riderConfirmPatientLocation('${d.id}')">
                         📞 Call Receiver & Confirm Location
@@ -11269,7 +11348,7 @@ window.searchLabPatients = function(query){
           ).join("")
         : '<option value="">No matching patients</option>';
       status.textContent = patients.length
-        ? `Showing ${patients.length} match${patients.length===1?"":"es"} (maximum 25). Select one to continue.`
+        ? `Showing all ${patients.length} matching patient${patients.length===1?"":"s"}. Select one to continue.`
         : "No patient matched that search.";
     }catch(error){
       if(requestId !== labPatientSearchRequest) return;
@@ -11846,7 +11925,7 @@ window.renderConsultation = async function(){
   const isDoc = currentUser.role==="doctor";
   $("content").innerHTML = `
     <h1 class="page-title">Consultation</h1>
-    <div class="alert alert-info">Maximum consultation duration: <strong>45 minutes</strong>. Live captions, transcription and translation are available during every consultation. Patients cannot join unpaid consultations.</div>
+    <div class="alert alert-info">Maximum consultation duration: <strong>45 minutes</strong>. Audio-only calls are supported; the camera is optional. Patients can join after the appointment is confirmed and the clinician starts the consultation. Live captions require browser speech recognition (Chrome or Edge recommended).</div>
     ${mine.length ? mine.map(a=>{
       const p = getUser(a.patientId), d = getUser(a.doctorId);
       const prev = isDoc ? patientHistory(a.patientId,a.id).length : 0;
@@ -11854,7 +11933,13 @@ window.renderConsultation = async function(){
         <div><h3>${esc(isDoc ? p?.name : d?.name)}</h3>
           <p class="text-muted">${esc(a.date)} ${esc(a.time)} – ${esc(a.endTime)}<br>${esc(a.specialty||d?.specialty||"Clinical Provider")}<br>${esc(a.type)}</p>
           ${isDoc ? `<span class="badge ${prev?"badge-info":"badge-dark"}">${prev} previous visit${prev===1?"":"s"} with notes</span>` : ""}</div>
-        <div>${isDoc?`<button class="btn btn-secondary" onclick="v8OpenRecord('${a.patientId}')">📋 History</button>`:""}<button class="btn btn-primary" onclick="joinConsultation('${a.id}')">🎥 Join</button></div>
+        <div>
+          ${isDoc?`<button class="btn btn-secondary" onclick="v8OpenRecord('${a.patientId}')">📋 History</button>`:""}
+          ${a.type==="Physical Hospital Visit"
+            ? `<button class="btn btn-primary" onclick="joinConsultation('${a.id}','audio')">Open Visit</button>`
+            : `<button class="btn btn-primary" onclick="joinConsultation('${a.id}','audio')">🎧 Join Audio</button>
+               <button class="btn btn-success" onclick="joinConsultation('${a.id}','video')">📹 Join Video</button>`}
+        </div>
       </div></div>`;
     }).join("") : `<div class="card"><div class="empty">No confirmed consultations.</div></div>`}`;
 };
@@ -11899,7 +11984,7 @@ function updatePresence(S){
   el.innerHTML = on ? `<span class="v8-dot on"></span> ${esc(S.otherName)} is in the consultation` : `<span class="v8-dot"></span> Waiting for ${esc(S.otherName)} to join…`;
 }
 
-window.joinConsultation = async function(appointmentId){
+window.joinConsultation = async function(appointmentId, mediaMode="audio"){
   const a = db.appointments.find(x=>x.id===appointmentId);
   if(!a || !["Confirmed","In Consultation"].includes(a.status)){ alert("This consultation has not been confirmed."); return; }
   if(a.patientId!==currentUser.id && a.doctorId!==currentUser.id){ alert("You are not a participant in this consultation."); return; }
@@ -11921,7 +12006,7 @@ window.joinConsultation = async function(appointmentId){
   const other = getUser(isDoctor ? a.patientId : a.doctorId);
   const c = isDoctor ? getOrCreateConsult(a) : consultByAppt(a.id);
   if(isDoctor) saveDB();
-  const S = V8.session = {apptId:a.id, a, isDoctor, otherName:other?.name||"the other participant", otherSeen:0, lines:[], speakLang:"en", viewLang:"orig",
+  const S = V8.session = {apptId:a.id, a, isDoctor, mediaMode:mediaMode==="video"?"video":"audio", otherName:other?.name||"the other participant", otherSeen:0, lines:[], speakLang:"en", viewLang:"orig",
     captionsOn:false, startedAt:Date.now(), translators:{}, lastSaved:0, signalCursor:0, pendingCandidates:[], localCandidates:[], localDescriptionSent:false, rtcStopped:false, rtcEnded:false};
   /* A returning transcript (e.g. doctor re-joins) is restored. */
   if(c && c.transcript && c.transcript.length) S.lines = c.transcript.map(l=>({...l}));
@@ -11930,7 +12015,7 @@ window.joinConsultation = async function(appointmentId){
   const langOpts = (sel)=>LANGS.map(l=>`<option value="${l.code}" ${l.code===sel?"selected":""}>${l.label}</option>`).join("");
 
   $("modalContent").innerHTML = `
-  <div class="flex space-between"><h2 style="margin:0">${physical?"In-person Visit":"Telemedicine Consultation"}</h2><div id="v8Presence" class="small"></div></div>
+  <div class="flex space-between"><h2 style="margin:0">${physical?"In-person Visit":`${S.mediaMode==="video"?"Video":"Audio"} Consultation`}</h2><div id="v8Presence" class="small"></div></div>
   <div class="small text-muted" style="margin:4px 0 12px">${esc(a.date)} ${esc(a.time)}–${esc(a.endTime)} · ${esc(a.type)} · ${isDoctor?"Patient":"Doctor"}: <strong>${esc(other?.name||"-")}</strong></div>
   <div id="v8Status"></div>
   <div class="v8-room">
@@ -11939,7 +12024,7 @@ window.joinConsultation = async function(appointmentId){
       <div class="v8-video" id="v8Video">
         <video id="v8RemoteVideo" class="v8-remote-video hidden" autoplay playsinline></video>
         <div class="v8-remote" id="v8RemotePlaceholder"><div class="v8-avatar">${esc((other?.name||"?").charAt(0).toUpperCase())}</div><div>${esc(other?.name||"")}</div>
-          <div class="small" style="opacity:.8">${physical?"In-person consultation":"Waiting for the other participant to connect…"}</div></div>
+          <div class="small" style="opacity:.8">${physical?"In-person consultation":S.mediaMode==="audio"?"Audio call — camera is off":"Waiting for the other participant to connect…"}</div></div>
         <video id="v8LocalVideo" class="v8-local hidden" autoplay muted playsinline></video>
         <div id="v8CapOverlay" class="v8-overlay hidden"></div>
       </div>
@@ -11949,6 +12034,8 @@ window.joinConsultation = async function(appointmentId){
         <button id="v8CapBtn" class="btn btn-dark" onclick="v8ToggleCaptions()">🔤 Captions: off</button>
       </div>
       <div class="card v8-cap-card">
+        <h3 style="margin:0 0 6px">💬 In-call Chat & Live Captions</h3>
+        <p class="small text-muted" style="margin-top:0">Audio-only call: leave the camera off and turn your microphone on. The clinician must also turn their microphone on. Captions are transcribed on each speaker's device and shared with the other participant.</p>
         <div class="grid grid-2" style="gap:10px">
           <div class="form-group" style="margin:0"><label class="small">I speak</label><select id="v8Speak" class="form-control" onchange="v8SetSpeak(this.value)">${langOpts("en")}</select></div>
           <div class="form-group" style="margin:0"><label class="small">Show captions in</label><select id="v8View" class="form-control" onchange="v8SetView(this.value)"><option value="orig">Original (no translation)</option>${langOpts("")}</select></div>
@@ -11957,8 +12044,8 @@ window.joinConsultation = async function(appointmentId){
         <div id="v8Transcript" class="v8-transcript"></div>
         <div id="v8Interim" class="v8-interim small"></div>
         <div class="flex" style="margin-top:8px;flex-wrap:nowrap">
-          <input id="v8Typed" class="form-control" placeholder="Type a message (also captioned & translated)…" onkeydown="if(event.key==='Enter'){event.preventDefault();v8SendTyped();}">
-          <button class="btn btn-primary" onclick="v8SendTyped()">Send</button>
+          <input id="v8Typed" class="form-control" aria-label="Message to the other consultation participant" placeholder="Type a message to the clinician or patient…" onkeydown="if(event.key==='Enter'){event.preventDefault();v8SendTyped();}">
+          <button class="btn btn-primary" onclick="v8SendTyped()">Send Message</button>
         </div>
         <div class="flex" style="margin-top:6px"><button class="btn btn-secondary" onclick="v8DownloadTranscript()">⬇ Download transcript</button>
           <span class="small text-muted">${isDoctor?"The transcript is saved to the patient's record.":"Captions are shared with your doctor; the transcript is kept in your medical record."}</span></div>
@@ -11984,7 +12071,10 @@ window.joinConsultation = async function(appointmentId){
     </div>
   </div>`;
   V8.wideNext = true; openModal();
-  if(!physical) startRtcConnection(S);
+  if(!physical){
+    startRtcConnection(S);
+    activateCallMedia(S);
+  }
   S.timerRemaining = 45*60;
 
   /* countdown – the doctor's session ends the consultation automatically */
@@ -12051,6 +12141,8 @@ async function handleRtcSignal(S,message){
     for(const candidate of S.pendingCandidates.splice(0)) await addRemoteRtcCandidate(S,candidate);
   }else if(message.type==="candidate"){
     await addRemoteRtcCandidate(S,message.payload);
+  }else if(message.type==="caption"){
+    receiveCaption(S,message.payload);
   }else if(message.type==="leave"){
     S.otherSeen=0;
     updatePresence(S);
@@ -12127,8 +12219,8 @@ async function startRtcConnection(S){
       }
     };
     pc.onconnectionstatechange=()=>{
-      if(pc.connectionState==="connected") rtcStatus(S,"Live video connection established.","success");
-      else if(pc.connectionState==="connecting") rtcStatus(S,"Connecting audio and video…");
+      if(pc.connectionState==="connected") rtcStatus(S,"Live audio connection established. Camera is optional.","success");
+      else if(pc.connectionState==="connecting") rtcStatus(S,"Connecting audio…");
       else if(pc.connectionState==="disconnected") rtcStatus(S,"Connection interrupted. Trying to reconnect…","warning");
       else if(pc.connectionState==="failed") rtcStatus(S,"Could not connect. A TURN relay may be required; configure BEACON_TURN_URLS, BEACON_TURN_USERNAME, and BEACON_TURN_CREDENTIAL on the server.","danger");
     };
@@ -12203,6 +12295,12 @@ window.v8ToggleMic = async function(){
 window.startCamera = ()=>window.v8ToggleCam();
 window.startMicrophone = ()=>window.v8ToggleMic();
 
+async function activateCallMedia(S){
+  if(V8.session!==S) return;
+  await window.v8ToggleMic();
+  if(S.mediaMode==="video" && V8.session===S) await window.v8ToggleCam();
+}
+
 /* ---------- captions: speech → text ---------- */
 window.v8SetSpeak = function(code){
   const S = V8.session; if(!S) return; S.speakLang = code;
@@ -12254,6 +12352,11 @@ function startRecognition(S){
 }
 function stopRecognition(S){ try{ if(S.rec){ S.rec.onend = null; S.rec.stop(); } }catch(e){} S.rec = null; }
 
+function receiveCaption(S,line){
+  if(!line || typeof line.id!=="string" || S.lines.some(existing=>existing.id===line.id)) return;
+  addLine(S,line,false);
+}
+
 function commitLine(S,text){
   const line = {id:uid("line"), at:new Date().toISOString(), speakerId:currentUser.id, speakerName:currentUser.name, role:currentUser.role, lang:S.speakLang, text};
   addLine(S,line,true);
@@ -12267,9 +12370,15 @@ window.v8SendTyped = function(){
 /* A line is shown locally, translated into this viewer's language, shared with the other
    participant, and (on the doctor's side) saved to the patient's record. */
 function addLine(S,line,local){
+  if(S.lines.some(existing=>existing.id===line.id)) return;
   S.lines.push(line);
   renderLine(S,line);
-  if(local) busSend(S,"caption",line);
+  if(local){
+    busSend(S,"caption",line);
+    sendRtcSignal(S,"caption",line).catch(error=>{
+      capNote(S,`Caption could not be shared with the other participant: ${error.message||"connection unavailable."}`);
+    });
+  }
   if(S.isDoctor) scheduleTranscriptSave(S);
 }
 function renderLine(S,line){
@@ -12515,6 +12624,7 @@ let tickTimer = null;
 function v8Tick(){
   if(!currentUser) return;
   try{ rawSyncBookings(); releaseStaleBookings(); runReminders(); }catch(e){ console.error(e); }
+  refreshBackendNotifications().catch(error=>console.error("Unable to refresh backend notifications:",error));
   refreshBell();
 }
 function startTick(){ if(!tickTimer){ tickTimer = setInterval(v8Tick, 30000); } v8Tick(); }
@@ -12675,7 +12785,22 @@ async function refreshBackendInvoices(){
   if(!["patient","admin","pharmacist"].includes(currentUser?.role)) return [];
   const remote=(await apiRequest("/invoices")).map(apiInvoiceToLocal);
   const remoteIds=new Set(remote.map(invoice=>invoice.id));
-  db.invoices=[...db.invoices.filter(invoice=>!remoteIds.has(invoice.id)),...remote];
+  const backendTypes = currentUser.role === "pharmacist"
+    ? new Set(["Pharmacy", "Delivery"])
+    : new Set(["Consultation", "Pharmacy", "Delivery", "Laboratory", "Home Assessment", "Home Service"]);
+  db.invoices=[
+    ...db.invoices.filter(invoice=>{
+      if(remoteIds.has(invoice.id)) return false;
+      if(currentUser.role==="patient" && invoice.patientId!==currentUser.id) return true;
+      const type=invoice.type || ({
+        medicine:"Pharmacy", delivery:"Delivery", lab:"Laboratory",
+        consultation:"Consultation", homeAssessment:"Home Assessment",
+        homeService:"Home Service"
+      })[invoice.kind];
+      return !(invoice.fromApi || backendTypes.has(type));
+    }),
+    ...remote
+  ];
   linkBackendDeliveryInvoices();
   saveDB();
   return remote;
@@ -12702,6 +12827,23 @@ async function refreshBackendDeliveries(){
   db.deliveries=[...db.deliveries.filter(delivery=>!remoteIds.has(delivery.id)),...remote];
   linkBackendDeliveryInvoices();
   saveDB();
+  return remote;
+}
+
+async function refreshBackendNotifications(){
+  if(!currentUser) return [];
+  const rows=await apiRequest("/notifications");
+  const remote=rows.map(row=>({...row,fromApi:true}));
+  const knownIds=new Set(db.notifications.filter(item=>item.fromApi).map(item=>item.id));
+  remote.filter(item=>!item.read&&!knownIds.has(item.id)).forEach(item=>{
+    if(!V8.seen.has(item.id)){
+      V8.seen.add(item.id);
+      pushToast(item);
+    }
+  });
+  db.notifications=[...db.notifications.filter(item=>!item.fromApi),...remote];
+  saveDB();
+  refreshBell();
   return remote;
 }
 
@@ -12809,13 +12951,17 @@ window.createHomeService=async function(event){
   const name=document.getElementById("homeService")?.value||"";
   const service=HOME_SERVICES.find(item=>item.name===name&&item.active!==false);
   const date=document.getElementById("homeDate")?.value||"", time=document.getElementById("homeTime")?.value||"";
-  const providerId=document.getElementById("homeProvider")?.value||"";
+  let providerId=document.getElementById("homeProvider")?.value||"";
   const address=(document.getElementById("homeAddress")?.value||"").trim();
   const transport=document.getElementById("homeTransport")?.value||"0";
   const transportFee=transport==="quotation"?0:Number(transport);
-  if(!service||!providerId||!address||!validateHospitalBookingWindow(date,time,"home service")){
-    if(!service||!providerId||!address) alert("Please complete all home-service details.");
-    return;
+  if(!validateHospitalBookingWindow(date,time,"home service")) return;
+  if(!service||!address){alert("Please select a service and enter the service address.");return;}
+  if(!providerId){
+    const nurse=assignNurse(date,time);
+    if(!nurse){alert("No nursing officer is free at that time. Please choose another time.");return;}
+    setAutoNurse("homeProvider",nurse);
+    providerId=nurse.id;
   }
   const button=event.currentTarget.querySelector("button[type='submit'],button:not([type])");
   if(button) button.disabled=true;
@@ -13124,17 +13270,48 @@ window.riderMarkDelivered=async function(deliveryId){
 
 const localRenderDeliveries=window.renderDeliveries;
 window.renderDeliveries=async function(){
-  try{await Promise.all([refreshBackendDeliveries(),refreshBackendInvoices()]);await localRenderDeliveries();}
+  try{await Promise.all([refreshBackendDeliveries(),refreshBackendInvoices(),refreshBackendNotifications()]);await localRenderDeliveries();}
   catch(error){document.getElementById("content").innerHTML=`<h1 class="page-title">Medicine Deliveries</h1><div class="alert alert-danger">Unable to load deliveries: ${escapeHTML(error.message||"Please try again.")} <button class="btn btn-secondary" onclick="renderDeliveries()">Retry</button></div>`;}
 };
 renderDeliveries=window.renderDeliveries;
 
 const localRenderRiderDashboard=window.renderRiderDashboard;
 window.renderRiderDashboard=async function(){
-  try{await refreshBackendDeliveries();await localRenderRiderDashboard();}
+  try{await Promise.all([refreshBackendDeliveries(),refreshBackendNotifications()]);await localRenderRiderDashboard();}
   catch(error){document.getElementById("content").innerHTML=`<h1 class="page-title">Rider Dashboard</h1><div class="alert alert-danger">Unable to load rider deliveries: ${escapeHTML(error.message||"Please try again.")}</div>`;}
 };
 renderRiderDashboard=window.renderRiderDashboard;
+
+const localRenderNotifications=window.renderNotifications;
+window.renderNotifications=async function(){
+  try{
+    await refreshBackendNotifications();
+    const unread= db.notifications.filter(item=>item.fromApi&&item.userId===currentUser.id&&!item.read);
+    localRenderNotifications();
+    await Promise.all(unread.map(item=>
+      apiRequest(`/notifications/${encodeURIComponent(item.id)}/read`,{method:"POST",body:"{}"})
+    ));
+    unread.forEach(item=>{item.read=true;});
+    saveDB(); refreshBell();
+  }catch(error){
+    document.getElementById("content").innerHTML=`<h1 class="page-title">Notifications</h1><div class="alert alert-danger">Unable to load notifications: ${escapeHTML(error.message||"Please try again.")} <button class="btn btn-secondary" onclick="renderNotifications()">Retry</button></div>`;
+  }
+};
+
+const localMarkAllNotificationsRead=window.v8MarkAllRead;
+window.v8MarkAllRead=async function(){
+  try{
+    await refreshBackendNotifications();
+    const unread=db.notifications.filter(item=>item.fromApi&&item.userId===currentUser.id&&!item.read);
+    await Promise.all(unread.map(item=>
+      apiRequest(`/notifications/${encodeURIComponent(item.id)}/read`,{method:"POST",body:"{}"})
+    ));
+    unread.forEach(item=>{item.read=true;});
+    localMarkAllNotificationsRead();
+  }catch(error){
+    alert(error.message||"Unable to mark notifications as read. Please try again.");
+  }
+};
 window.showDeliveryDetailsForm=showDeliveryDetailsForm;
 window.showRefillForm=showRefillForm;
 window.showHomeServiceCatalogForm=showHomeServiceCatalogForm;

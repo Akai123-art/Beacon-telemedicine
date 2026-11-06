@@ -26,19 +26,33 @@ them to the hosted disk using a secure, verified process before directing users
 to the hosted app. Do not put real patient records or credentials in source
 control.
 
-## Telemedicine video calls
+## Telemedicine audio/video consultations
 
-The consultation room uses browser WebRTC for audio/video. Flask authenticates
-the two appointment participants and exchanges WebRTC offers, answers, and ICE
-candidates; the media itself is sent directly between their browsers. This
-signaling queue is held in server memory and expires after one hour, so keep the
-service on one process/worker (the Render command above already uses one worker).
-A process restart interrupts any active call.
+The consultation room uses browser WebRTC for audio/video; audio-only calls work
+with the camera left off. Flask authenticates the two appointment participants
+and exchanges WebRTC offers, answers, ICE candidates, and live caption text; the
+audio/video media itself is sent directly between their browsers. Signaling and
+caption messages are held in server memory and expire after one hour, so keep
+the service on one process/worker (the Render command above already uses one
+worker). A process restart interrupts any active call.
 
 Render serves the app over HTTPS, which browsers require for camera and
-microphone access. The doctor must start a confirmed video appointment first;
-then both doctor and patient open Consultation, join that appointment, and
-allow camera/microphone access with the on-screen controls.
+microphone access. The doctor must join a confirmed appointment first to start
+it. The patient can then open Consultation and join. Both participants should
+turn on the microphone in the consultation controls; the camera is optional.
+Live speech captions use the browser's speech-recognition feature (Chrome/Edge
+recommended): each participant's browser transcribes their own microphone and
+shares the resulting text with the other participant. Caption support and
+accuracy depend on the browser, language, microphone permissions, and network.
+From the Consultation page, the clinician selects **Join Audio** or **Join
+Video** to start a confirmed appointment, then the patient selects the same
+appointment's audio or video option to join. The selected mode turns on the
+microphone (and, for video, requests camera access); participants can mute or
+turn the camera off with the in-call controls. Use **In-call Chat & Live
+Captions** to exchange typed messages or captions while connected.
+The doctor-side transcript is saved in that browser's local storage; do not use
+this feature with real patient information until storage, consent, and
+applicable healthcare requirements have been reviewed.
 
 The app includes a public STUN server for basic connectivity. Some mobile,
 corporate, or restrictive networks require a TURN relay. Configure a TURN
@@ -51,9 +65,18 @@ service with these Render environment variables if participants cannot connect:
 Use credentials from a trusted TURN provider and rotate them. The configured
 TURN username and credential are delivered to authorized appointment
 participants so their browsers can connect; use provider-issued short-lived
-credentials where available. The app does not record calls. Do not use real
-patient consultations until you have verified access controls, privacy,
+credentials where available. The app does not record audio or video. Do not use
+real patient consultations until you have verified access controls, privacy,
 consent, and the applicable healthcare requirements.
+
+## Medicine delivery workflow
+
+After the patient pays both the medicine and delivery invoices, the pharmacist
+assigns an enabled rider from Pharmacy Orders. The rider signs in and opens
+**My Deliveries** or the dashboard to see deliveries assigned to their account,
+including the order, medicine items, receiver contact, and confirmed directions.
+The rider then records pickup, confirms the receiver's location by phone, starts
+transit, and completes delivery with the patient's delivery code.
 
 For a one-time administrator password recovery, set
 `BEACON_RESET_ADMIN_PASSWORD=1` and `BEACON_ADMIN_PASSWORD` in Render, restart
