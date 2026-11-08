@@ -757,14 +757,17 @@ def set_delivery(oid):
                        "createdAt": now()})
     pending_invoice = next((invoice for invoice in invoices
                             if invoice.get("status") != "Paid"), None)
-    inv = update("invoices", pending_invoice["id"], amount=fee, description="Medicine delivery") if pending_invoice else \
-        make_invoice(o["patientId"], "delivery", oid, fee, "Medicine delivery")
+    description = f"Medicine delivery fee for pharmacy order {oid}"
+    inv = update("invoices", pending_invoice["id"], amount=fee, description=description) if pending_invoice else \
+        make_invoice(o["patientId"], "delivery", oid, fee, description)
     delivery = update("deliveries", delivery["id"], deliveryInvoiceId=inv["id"])
-    update("pharmacyOrders", oid, status="Awaiting Delivery Payment", deliveryId=delivery["id"],
-           deliveryFee=fee, deliveryAddress=address, deliveryPaymentStatus="Pending")
-    notify(o["patientId"], f"Delivery details confirmed. Delivery fee: KES {fee}.")
-    return jsonify({"delivery": view_delivery(delivery), "invoice": inv, "distanceKm": km, "fee": fee,
-                    "quotation": quotation})
+    order = update("pharmacyOrders", oid, status="Awaiting Delivery Payment", deliveryId=delivery["id"],
+                   deliveryFee=fee, deliveryAddress=address, deliveryPaymentStatus="Pending")
+    notify(o["patientId"],
+           f"Delivery details confirmed. Delivery fee invoice {inv['id']} for KES {fee:g} "
+           "is ready in Invoices & Payments and Pharmacy Orders.")
+    return jsonify({"delivery": view_delivery(delivery), "order": order, "invoice": inv,
+                    "distanceKm": km, "fee": fee, "quotation": quotation})
 # Cell 8 - payments (simulated M-Pesa) and the delivery lifecycle
 def after_payment(inv):
     """Move the related record to its next status once an invoice is paid."""

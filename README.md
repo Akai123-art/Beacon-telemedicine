@@ -83,6 +83,11 @@ the delivery invoice on the patient's account. The patient dashboard refreshes
 the unpaid-invoice count from the server; patients can open **Invoices &
 Payments** to review and pay the delivery fee.
 
+For a non-payable local display preview on Melvin Okoth's account, open the app
+with `/?demoDeliveryInvoice=1` and sign in as Melvin. The sample delivery-fee
+row is browser-only, clearly marked as a demo, and its payment action is
+disabled; it does not create an invoice or payment in SQLite.
+
 For a one-time administrator password recovery, set
 `BEACON_RESET_ADMIN_PASSWORD=1` and `BEACON_ADMIN_PASSWORD` in Render, restart
 the service, then remove `BEACON_RESET_ADMIN_PASSWORD` so it cannot reset the

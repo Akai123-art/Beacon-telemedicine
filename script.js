@@ -5692,6 +5692,22 @@ return R*c;
 INVOICES
 ========================================================= */
 
+function normalizeInvoiceStatus(status){
+  return ["unpaid","awaiting payment","pending payment"].includes(
+    String(status||"").trim().toLowerCase()
+  )?"Pending":status;
+}
+
+function isUnpaidInvoiceStatus(status){
+  return ["pending","unpaid","awaiting payment","pending payment"].includes(
+    String(status||"").trim().toLowerCase()
+  );
+}
+
+function isDeliveryInvoice(invoice){
+  return String(invoice.type||invoice.kind||"").toLowerCase().includes("delivery");
+}
+
 async function renderInvoices(){
 
 const content=document.getElementById("content");
@@ -5707,7 +5723,7 @@ try{
     appointmentId:invoice.appointmentId||(invoice.kind==="consultation"?invoice.refId:undefined),
     pharmacyOrderId:invoice.pharmacyOrderId||(invoice.kind==="medicine"?invoice.refId:undefined),
     homeServiceId:invoice.homeServiceId||(["homeAssessment","homeService"].includes(invoice.kind)?invoice.refId:undefined),
-    status:invoice.status==="Unpaid"?"Pending":invoice.status,
+    status:normalizeInvoiceStatus(invoice.status),
     items:invoice.items||[{description:invoice.description||invoice.kind||"Invoice"}],
     fromApi:true
   }));
@@ -5722,7 +5738,7 @@ try{
   return;
 }
 
-const invoices=
+const accountInvoices=
 currentUser.role==="admin"
 ?
 db.invoices
@@ -5732,6 +5748,22 @@ i=>
 i.patientId===
 currentUser.id
 );
+const showMelvinDeliveryDemo=
+  currentUser.role==="patient" &&
+  String(currentUser.name||"").trim().toLowerCase()==="melvin okoth" &&
+  new URLSearchParams(window.location.search).get("demoDeliveryInvoice")==="1";
+const demoDeliveryInvoice=showMelvinDeliveryDemo?{
+  id:"DEMO-DELIVERY-001",
+  invoiceNumber:"DEMO-DELIVERY-001",
+  patientId:currentUser.id,
+  pharmacyOrderId:"ord_b82eba99",
+  type:"Delivery",
+  total:175,
+  status:"Demo",
+  demoOnly:true,
+  items:[{description:"DEMO ONLY — Sample medicine delivery fee for order ord_b82eba99"}]
+}:null;
+const invoices=demoDeliveryInvoice?[...accountInvoices,demoDeliveryInvoice]:accountInvoices;
 
 document.getElementById(
 "content"
@@ -5751,6 +5783,8 @@ document.getElementById(
   M-Pesa Daraja/payment confirmation and webhook verification.
 
 </div>
+
+${showMelvinDeliveryDemo?`<div class="alert alert-warning"><strong>DEMO PREVIEW ONLY.</strong> The sample delivery fee below is not a real invoice, is not saved to the server, and cannot be paid.</div>`:""}
 
 <div class="card">
 
@@ -5781,7 +5815,7 @@ document.getElementById(
             </td>
 
             <td>
-              ${i.type}
+              ${isDeliveryInvoice(i)?"Delivery Fee":escapeHTML(i.type||i.kind||"Invoice")}
             </td>
 
             <td>
@@ -5808,7 +5842,7 @@ document.getElementById(
                 : "badge-warning"
               }">
 
-                ${i.status}
+                ${i.demoOnly?"Demo only":escapeHTML(i.status||"Pending")}
 
               </span>
 
@@ -5817,17 +5851,19 @@ document.getElementById(
             <td>
 
               ${
-                i.status==="Pending" &&
-                currentUser.role==="patient"
-                ?
-                `<button
+                i.demoOnly
+                ? `<button class="btn btn-secondary" type="button" disabled>Pay Delivery Fee (Demo Only)</button>`
+                : isUnpaidInvoiceStatus(i.status) &&
+                  currentUser.role==="patient"
+                  ?
+                  `<button
                    class="btn btn-success"
                    onclick="processDemoPayment('${i.id}'); return false;"
                  >
-                   Pay M-Pesa Paybill
+                   ${isDeliveryInvoice(i)?"Pay Delivery Fee":"Pay M-Pesa Paybill"}
                  </button>`
-                :
-                ""
+                  :
+                  ""
               }
 
             </td>
@@ -10097,89 +10133,8 @@ function trackDelivery(){ alert("Live GPS tracking is not used. The rider confir
     openModal();
   };
 
-  window.saveFinalDeliveryDetails = function(event, deliveryId){
-    event.preventDefault();
-
-    if(currentUser?.role !== "pharmacist"){
-      alert("Only the pharmacist can save delivery details.");
-      return;
-    }
-
-    const d = db.deliveries.find(x => x.id === deliveryId);
-    if(!d) return;
-
-    const location =
-      document.getElementById("finalDeliveryLocation")?.value.trim() || "";
-    const directions =
-      document.getElementById("finalDeliveryDirections")?.value.trim() || "";
-    const receiverPhone =
-      document.getElementById("finalReceiverPhone")?.value.trim() || "";
-    const fee =
-      Number(document.getElementById("finalDeliveryFee")?.value);
-
-    if(!location || !directions || !receiverPhone ||
-       !Number.isFinite(fee) || fee < 0){
-      alert("Please enter the confirmed location, directions, receiver phone and delivery fee.");
-      return;
-    }
-
-    d.deliveryLocation = location;
-    d.directions = directions;
-    d.receiverPhone = receiverPhone;
-    d.deliveryFee = fee;
-    d.deliveryPaymentStatus = "Pending";
-    d.status = "Awaiting Delivery Payment";
-    d.detailsConfirmedAt = new Date().toISOString();
-    d.detailsConfirmedBy = currentUser.id;
-
-    const order = db.pharmacyOrders.find(o => o.id === d.pharmacyOrderId);
-    if(order){
-      order.status = "Awaiting Delivery Payment";
-      order.deliveryPaymentStatus = "Pending";
-    }
-
-    let inv = deliveryInvoice(d.id);
-
-    if(!inv){
-      inv = {
-        id:uid("invoice"),
-        invoiceNumber:invoiceNumber("DEL"),
-        type:"Delivery",
-        deliveryId:d.id,
-        pharmacyOrderId:d.pharmacyOrderId,
-        patientId:d.patientId,
-        items:[
-          {description:"Medicine delivery",quantity:1,unitPrice:fee}
-        ],
-        total:fee,
-        status:"Pending",
-        paymentMethod:null,
-        transactionReference:null,
-        createdAt:new Date().toISOString()
-      };
-      db.invoices.push(inv);
-    }else{
-      inv.items=[
-        {description:"Medicine delivery",quantity:1,unitPrice:fee}
-      ];
-      inv.total=fee;
-      inv.status="Pending";
-      inv.paymentMethod=null;
-      inv.transactionReference=null;
-    }
-
-    d.deliveryInvoiceId = inv.id;
-
-    saveDB();
-
-    notify(
-      d.patientId,
-      `Delivery invoice ${inv.invoiceNumber} is ready. Delivery fee: ${money(fee)}. Please pay the delivery fee before dispatch.`
-    );
-
-    closeModal();
-    alert("Delivery details saved. The patient has been sent the delivery invoice.");
-    renderPharmacy();
+  window.saveFinalDeliveryDetails = async function(event, deliveryId){
+    return window.saveDeliveryDetails(event, deliveryId);
   };
 
   /* ---------- Pharmacist: dispatch + rider assignment ---------- */
@@ -10649,6 +10604,12 @@ function trackDelivery(){ alert("Live GPS tracking is not used. The rider confir
                   action = phone
                     ? `<a class="btn btn-secondary" href="tel:${escapeHTML(phone)}">📞 Contact Receiver</a>`
                     : "-";
+                  if(d.status === "In Transit" && d.otp){
+                    action += `<div class="alert alert-info small" style="margin-top:8px">
+                      <strong>Delivery OTP: ${escapeHTML(d.otp)}</strong><br>
+                      Give this code to the rider only when your medicine arrives.
+                    </div>`;
+                  }
                 }
 
                 return `
@@ -12617,6 +12578,29 @@ function v8Tick(){
   if(!currentUser) return;
   try{ rawSyncBookings(); releaseStaleBookings(); runReminders(); }catch(e){ console.error(e); }
   refreshBackendNotifications().catch(error=>console.error("Unable to refresh backend notifications:",error));
+  if(currentUser.role==="patient"){
+    const patientId=currentUser.id;
+    const snapshot=invoices=>JSON.stringify(invoices
+      .filter(invoice=>invoice.patientId===patientId)
+      .map(invoice=>[invoice.id,invoice.status,invoice.amount??invoice.total,invoice.updatedAt])
+      .sort((a,b)=>String(a[0]).localeCompare(String(b[0]))));
+    const previousInvoices=snapshot(db.invoices);
+    refreshBackendInvoices().then(remote=>{
+      if(currentUser?.id!==patientId) return;
+      if(currentPage==="dashboard"){
+        const count=db.invoices.filter(invoice=>
+          invoice.patientId===patientId&&invoice.status==="Pending"
+        ).length;
+        const card=Array.from(document.querySelectorAll(".stat-card")).find(item=>
+          item.querySelector(".stat-title")?.textContent==="Unpaid Invoices"
+        );
+        const value=card?.querySelector(".stat-number");
+        if(value) value.textContent=String(count);
+      }else if(currentPage==="invoices"&&snapshot(remote)!==previousInvoices){
+        renderInvoices();
+      }
+    }).catch(error=>console.error("Unable to refresh patient invoices:",error));
+  }
   refreshBell();
 }
 function startTick(){ if(!tickTimer){ tickTimer = setInterval(v8Tick, 30000); } v8Tick(); }
@@ -12756,7 +12740,7 @@ function apiInvoiceToLocal(invoice){
     homeServiceId:invoice.homeServiceId||(["homeAssessment","homeService"].includes(invoice.kind)?invoice.refId:undefined),
     pharmacyOrderId:invoice.pharmacyOrderId||(invoice.kind==="delivery"?invoice.refId:undefined)||(invoice.kind==="medicine"?invoice.refId:undefined),
     deliveryId:invoice.deliveryId||linkedDelivery?.id,
-    status:invoice.status==="Unpaid"?"Pending":invoice.status,
+    status:normalizeInvoiceStatus(invoice.status),
     items:invoice.items||[{description:invoice.description||invoice.kind||"Invoice"}], fromApi:true};
 }
 
@@ -13238,10 +13222,14 @@ window.saveDeliveryDetails=async function(event,deliveryId){
   if(currentUser?.role!=="pharmacist") return;
   const delivery=db.deliveries.find(item=>item.id===deliveryId);
   const orderId=delivery?.pharmacyOrderId||delivery?.orderId;
-  const address=(document.getElementById("deliveryLocation")?.value||"").trim();
-  const directions=(document.getElementById("deliveryDirections")?.value||"").trim();
-  const receiverPhone=(document.getElementById("receiverPhone")?.value||"").trim();
-  const fee=Number(document.getElementById("deliveryFee")?.value);
+  const address=(document.getElementById("deliveryLocation")?.value||
+    document.getElementById("finalDeliveryLocation")?.value||"").trim();
+  const directions=(document.getElementById("deliveryDirections")?.value||
+    document.getElementById("finalDeliveryDirections")?.value||"").trim();
+  const receiverPhone=(document.getElementById("receiverPhone")?.value||
+    document.getElementById("finalReceiverPhone")?.value||"").trim();
+  const fee=Number(document.getElementById("deliveryFee")?.value||
+    document.getElementById("finalDeliveryFee")?.value);
   if(!orderId||!address||!directions||!receiverPhone||!Number.isFinite(fee)||fee<0){
     alert("Please enter a valid location, directions, receiver phone and delivery fee."); return;
   }
@@ -13250,15 +13238,27 @@ window.saveDeliveryDetails=async function(event,deliveryId){
       method:"POST",body:JSON.stringify({address,directions,receiverPhone,fee})
     });
     const saved={...result.delivery,pharmacyOrderId:orderId,deliveryLocation:address,fromApi:true};
-    db.deliveries=[...db.deliveries.filter(item=>item.id!==saved.id),saved];
-    const invoice=apiInvoiceToLocal(result.invoice);
-    if(invoice){
-      invoice.deliveryId=saved.id;
-      invoice.pharmacyOrderId=orderId;
-      db.invoices=[...db.invoices.filter(item=>item.id!==invoice.id),invoice];
-      saved.deliveryInvoiceId=invoice.id;
+    const updatedOrder=result.order?{...result.order,fromApi:true}:null;
+    if(saved.status!=="Awaiting Delivery Payment"||updatedOrder?.status!=="Awaiting Delivery Payment"){
+      throw new Error("The server saved the delivery details but did not confirm the expected delivery and order statuses. Refresh the pharmacy orders and try again.");
     }
-    await refreshPharmacyOrders(); closeModal(); saveDB(); alert("Delivery details saved. The delivery fee is now on the patient's invoice."); await renderPharmacy();
+    const invoice=apiInvoiceToLocal(result.invoice);
+    if(!invoice||invoice.kind!=="delivery"||invoice.refId!==orderId||invoice.patientId!==saved.patientId){
+      throw new Error("Delivery details were saved, but the returned invoice does not match this patient's order. Please verify the pharmacy order before continuing.");
+    }
+    db.deliveries=[...db.deliveries.filter(item=>item.id!==saved.id),saved];
+    db.pharmacyOrders=[...db.pharmacyOrders.filter(item=>item.id!==updatedOrder.id),updatedOrder];
+    invoice.deliveryId=saved.id;
+    invoice.pharmacyOrderId=orderId;
+    db.invoices=[...db.invoices.filter(item=>item.id!==invoice.id),invoice];
+    saved.deliveryInvoiceId=invoice.id;
+    const visibleInvoices=await refreshBackendInvoices();
+    if(!visibleInvoices.some(item=>item.id===invoice.id&&item.patientId===saved.patientId)){
+      throw new Error("Delivery details were submitted, but the invoice could not be reloaded from the patient invoice list. Confirm the pharmacy and patient are using the same server, then retry.");
+    }
+    await refreshPharmacyOrders(); closeModal(); saveDB();
+    alert(`Delivery details saved. Invoice ${invoice.invoiceNumber} for KES ${Number(invoice.total).toFixed(2)} is confirmed on the patient's Payments page, and an in-app notification was recorded.`);
+    await renderPharmacy();
   }catch(error){alert(error.message||"Unable to save delivery details.");}
 };
 
