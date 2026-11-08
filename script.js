@@ -222,11 +222,12 @@ let consultIntervals = {};
 let riderWatchId = null;
 const AUTH_TOKEN_KEY = "beaconHopeAuthToken";
 const API_BASE_URL = `${window.location.origin}/api`;
+localStorage.removeItem(AUTH_TOKEN_KEY);
 localStorage.removeItem("beaconHopeCurrentUser");
 
 async function apiRequest(path, options={}){
   const headers = new Headers(options.headers || {});
-  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  const token = sessionStorage.getItem(AUTH_TOKEN_KEY);
   if(token) headers.set("Authorization", `Bearer ${token}`);
   if(options.body && !headers.has("Content-Type")){
     headers.set("Content-Type", "application/json");
@@ -670,7 +671,7 @@ function logout(){
 
   currentUser=null;
 
-  localStorage.removeItem(AUTH_TOKEN_KEY);
+  sessionStorage.removeItem(AUTH_TOKEN_KEY);
 
   localStorage.removeItem(
     "beaconHopeCurrentUser"
@@ -8431,7 +8432,7 @@ window.beaconLogin = async function(event){
       body: JSON.stringify({email, password})
     });
     const user = cacheBackendUser(result.user);
-    localStorage.setItem(AUTH_TOKEN_KEY, result.token);
+    sessionStorage.setItem(AUTH_TOKEN_KEY, result.token);
     currentUser = user;
     localStorage.setItem("beaconHopeCurrentUser", JSON.stringify(user));
     if(user.mustChangePassword){
@@ -8479,7 +8480,7 @@ window.registerPatient = async function(event){
   }
 };
 
-const savedAuthToken = localStorage.getItem(AUTH_TOKEN_KEY);
+const savedAuthToken = sessionStorage.getItem(AUTH_TOKEN_KEY);
 if(savedAuthToken){
   apiRequest("/me")
     .then(userData => {
@@ -8489,7 +8490,7 @@ if(savedAuthToken){
     })
     .catch(error => {
       if(error.status === 401 || error.status === 403){
-        localStorage.removeItem(AUTH_TOKEN_KEY);
+        sessionStorage.removeItem(AUTH_TOKEN_KEY);
         localStorage.removeItem("beaconHopeCurrentUser");
       }else{
         console.error("Unable to restore API session:", error);

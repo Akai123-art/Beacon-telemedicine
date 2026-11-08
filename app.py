@@ -10,8 +10,12 @@ BEACON_ADMIN_PASSWORD to the recovery password, then remove the reset flag.
 # Cell 2 - imports, config and a small SQLite document store
 import os
 import sqlite3, json, threading, math, secrets, csv, io, datetime as dt, time
+import base64
 from pathlib import Path
 from functools import wraps
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 from flask import Flask, request, jsonify, g, Response, send_from_directory
 from werkzeug.security import generate_password_hash, check_password_hash
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
@@ -475,21 +479,73 @@ def rtc_messages(aid):
         room["updated"] = time.time()
         return room
 
+def twilio_ice_servers(account_sid, auth_token):
+    endpoint = f"https://api.twilio.com/2010-04-01/Accounts/{quote(account_sid, safe='')}/Tokens.json"
+    credentials = base64.b64encode(f"{account_sid}:{auth_token}".encode()).decode("ascii")
+    req = Request(endpoint, data=b"", headers={
+        "Authorization": f"Basic {credentials}",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json",
+    }, method="POST")
+    with urlopen(req, timeout=10) as response:
+        data = json.loads(response.read().decode("utf-8"))
+
+    servers = data.get("ice_servers")
+    if not isinstance(servers, list):
+        raise ValueError("Twilio response did not include ICE servers")
+    ice_servers = []
+    for server in servers:
+        if not isinstance(server, dict):
+            continue
+        urls = server.get("urls") or server.get("url")
+        if isinstance(urls, str):
+            urls = [urls]
+        if not isinstance(urls, list):
+            continue
+        urls = [url for url in urls if isinstance(url, str) and url.startswith(("stun:", "turn:", "turns:"))]
+        if not urls:
+            continue
+        ice_server = {"urls": urls}
+        if any(url.startswith(("turn:", "turns:")) for url in urls):
+            username = server.get("username")
+            credential = server.get("credential")
+            if not isinstance(username, str) or not isinstance(credential, str):
+                raise ValueError("Twilio TURN response did not include credentials")
+            ice_server.update(username=username, credential=credential)
+        ice_servers.append(ice_server)
+    if not any(any(url.startswith(("turn:", "turns:")) for url in server["urls"]) for server in ice_servers):
+        raise ValueError("Twilio response did not include a TURN relay")
+    return ice_servers
+
 @app.get("/api/appointments/<aid>/rtc-config")
 @auth()
 def rtc_config(aid):
     appointment, error = rtc_appointment(aid, g.user)
     if error: return error
     ice_servers = [{"urls": ["stun:stun.l.google.com:19302"]}]
-    turn_urls = [url.strip() for url in os.environ.get("BEACON_TURN_URLS", "").split(",") if url.strip()]
-    turn_username = os.environ.get("BEACON_TURN_USERNAME", "")
-    turn_credential = os.environ.get("BEACON_TURN_CREDENTIAL", "")
-    if turn_urls and not (turn_username and turn_credential):
-        return err("TURN is configured without both username and credential", 503)
-    if turn_username and turn_credential and not turn_urls:
-        return err("TURN credentials are configured without a TURN URL", 503)
-    if turn_urls:
-        ice_servers.append({"urls": turn_urls, "username": turn_username, "credential": turn_credential})
+    twilio_sid = os.environ.get("BEACON_TWILIO_ACCOUNT_SID", "").strip()
+    twilio_token = os.environ.get("BEACON_TWILIO_AUTH_TOKEN", "").strip()
+    if twilio_sid or twilio_token:
+        if not (twilio_sid and twilio_token):
+            return err("Twilio TURN requires both account SID and auth token", 503)
+        try:
+            ice_servers.extend(twilio_ice_servers(twilio_sid, twilio_token))
+        except HTTPError as error:
+            app.logger.error("Twilio ICE server request failed with HTTP %s", error.code)
+            return err("Unable to retrieve Twilio TURN credentials; check the Twilio account configuration", 502)
+        except (URLError, TimeoutError, ValueError, json.JSONDecodeError) as error:
+            app.logger.error("Unable to retrieve Twilio ICE servers: %s", error)
+            return err("Unable to retrieve Twilio TURN credentials; check the Twilio account configuration", 502)
+    else:
+        turn_urls = [url.strip() for url in os.environ.get("BEACON_TURN_URLS", "").split(",") if url.strip()]
+        turn_username = os.environ.get("BEACON_TURN_USERNAME", "")
+        turn_credential = os.environ.get("BEACON_TURN_CREDENTIAL", "")
+        if turn_urls and not (turn_username and turn_credential):
+            return err("TURN is configured without both username and credential", 503)
+        if turn_username and turn_credential and not turn_urls:
+            return err("TURN credentials are configured without a TURN URL", 503)
+        if turn_urls:
+            ice_servers.append({"urls": turn_urls, "username": turn_username, "credential": turn_credential})
     response = jsonify({"iceServers": ice_servers})
     response.headers["Cache-Control"] = "no-store"
     return response

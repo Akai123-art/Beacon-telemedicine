@@ -40,6 +40,8 @@ Render serves the app over HTTPS, which browsers require for camera and
 microphone access. The doctor must join a confirmed appointment first to start
 it. The patient can then open Consultation and join. Both participants should
 turn on the microphone in the consultation controls; the camera is optional.
+Authentication is scoped to each browser tab, so signing in as the patient in
+another tab will not replace the clinician's session.
 Live speech captions use the browser's speech-recognition feature (Chrome/Edge
 recommended): each participant's browser transcribes their own microphone and
 shares the resulting text with the other participant. Caption support and
@@ -55,17 +57,27 @@ this feature with real patient information until storage, consent, and
 applicable healthcare requirements have been reviewed.
 
 The app includes a public STUN server for basic connectivity. Some mobile,
-corporate, or restrictive networks require a TURN relay. Configure a TURN
-service with these Render environment variables if participants cannot connect:
+corporate, or restrictive networks require a TURN relay. To use Twilio Network
+Traversal Service, add these environment variables to the local server or
+Render service:
+
+- `BEACON_TWILIO_ACCOUNT_SID`: Account SID from the Twilio Console
+- `BEACON_TWILIO_AUTH_TOKEN`: Auth Token from the Twilio Console
+
+The server requests short-lived ICE credentials from Twilio for each
+consultation setup; Twilio credentials remain on the server. Keep the Auth
+Token secret and never commit it. Twilio may charge for Network Traversal
+Service usage.
+
+Alternatively, a different TURN provider can be configured with:
 
 - `BEACON_TURN_URLS`: comma-separated TURN URLs, such as `turn:turn.example.com:3478?transport=udp,turns:turn.example.com:5349?transport=tcp`
 - `BEACON_TURN_USERNAME`: TURN username
 - `BEACON_TURN_CREDENTIAL`: TURN credential
 
-Use credentials from a trusted TURN provider and rotate them. The configured
-TURN username and credential are delivered to authorized appointment
-participants so their browsers can connect; use provider-issued short-lived
-credentials where available. The app does not record audio or video. Do not use
+Use credentials from a trusted provider and rotate them. For the generic TURN
+configuration, the TURN username and credential are delivered to authorized
+appointment participants. The app does not record audio or video. Do not use
 real patient consultations until you have verified access controls, privacy,
 consent, and the applicable healthcare requirements.
 
