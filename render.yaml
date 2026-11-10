@@ -17,3 +17,15 @@ services:
         sync: false
       - key: BEACON_SECRET_KEY
         generateValue: true
+      - key: BEACON_MPESA_ENV
+        value: sandbox
+      - key: BEACON_MPESA_CONSUMER_KEY
+        sync: false
+      - key: BEACON_MPESA_CONSUMER_SECRET
+        sync: false
+      - key: BEACON_MPESA_SHORTCODE
+        sync: false
+      - key: BEACON_MPESA_PASSKEY
+        sync: false
+      - key: BEACON_MPESA_CALLBACK_URL
+        sync: false

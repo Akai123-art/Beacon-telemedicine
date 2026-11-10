@@ -3976,12 +3976,12 @@ return;
 
 }
 
-processDemoPayment(
+processMpesaPayment(
 invoiceId
 );
 }
 
-function processDemoPayment(
+function processMpesaPayment(
 invoiceId
 ){
 
@@ -4004,28 +4004,24 @@ return;
 
 }
 
-if(!currentUser){
-
-alert("Please log in before making a payment.");
-return;
-
+if(invoice.status==="Pending" && invoice.paymentId){
+  if(invoice.paymentStatus==="Review Required"){
+    showMpesaPaymentReview(invoice.id,invoice.paymentId,Boolean(invoice.checkoutRequestId));
+  }else{
+    showMpesaPaymentPending(invoice.id,invoice.paymentId);
+  }
+  return;
 }
 
-if(
-currentUser.role!=="patient" &&
-currentUser.role!=="admin"
-){
-
-alert("You are not authorised to pay this invoice.");
-return;
-
+if(!currentUser || currentUser.role!=="patient"){
+  alert("Only the patient who owns this invoice can make a payment.");
+  return;
 }
 
-/*
-  Use the application's modal instead of browser prompt().
-  This is more reliable in Chrome/Edge and clearly shows
-  the M-Pesa phone-number field.
-*/
+if(!invoice.fromApi){
+  alert("This invoice is not available for online payment. Refresh invoices and try again.");
+  return;
+}
 
 const title =
 invoice.type==="Delivery"
@@ -4046,40 +4042,17 @@ document.getElementById("modalContent").innerHTML=`
     ${money(invoice.total)}
 
     <br><br>
-
-    <strong>Payment Method:</strong>
-    M-Pesa Paybill
-
-    <br>
-
-    <strong>Business Number:</strong>
-    979250
-
-    <br>
-
-    <strong>Account Name of the Client:</strong>
-    ${escapeHTML(getUser(invoice.patientId)?.name || currentUser?.name || "Client")}
+    Enter the M-Pesa number that should receive a payment prompt. Your invoice
+    will be marked paid only after Safaricom confirms the transaction.
 
   </div>
 
-  <div class="card" style="margin-bottom:16px;">
-    <strong>How to pay:</strong>
-    <ol style="margin:10px 0 0 20px;">
-      <li>Open M-Pesa on your phone.</li>
-      <li>Select <strong>Lipa na M-Pesa</strong>.</li>
-      <li>Select <strong>Pay Bill</strong>.</li>
-      <li>Enter Business Number <strong>979250</strong>.</li>
-      <li>Enter your name as the <strong>Account Name of the Client</strong>.</li>
-      <li>Enter the amount shown above and complete the payment.</li>
-    </ol>
-  </div>
-
-  <form onsubmit="submitDemoPayment(event,'${invoice.id}')">
+  <form onsubmit="submitMpesaPayment(event,'${invoice.id}')">
 
     <div class="form-group">
 
       <label for="mpesaPhone">
-        Payer M-Pesa Phone Number
+        M-Pesa phone number
       </label>
 
       <input
@@ -4090,12 +4063,12 @@ document.getElementById("modalContent").innerHTML=`
         autocomplete="tel"
         placeholder="e.g. 0712345678"
         maxlength="13"
+        value="${escapeHTML(getUser(invoice.patientId)?.phone || currentUser.phone || "")}"
         required
       >
 
       <div class="small text-muted mt">
-        Enter the phone number used to make the Paybill payment.
-        This is recorded for the current demo payment confirmation.
+        You can use a Kenyan 07… or 01… M-Pesa number.
       </div>
 
     </div>
@@ -4106,7 +4079,7 @@ document.getElementById("modalContent").innerHTML=`
         type="submit"
         class="btn btn-success"
       >
-        📱 Confirm Paybill Payment
+        📱 Send M-Pesa prompt
       </button>
 
       <button
@@ -4131,7 +4104,7 @@ setTimeout(()=>{
 
 }
 
-async function submitDemoPayment(
+async function submitMpesaPayment(
 event,
 invoiceId
 ){
@@ -4164,96 +4137,100 @@ const phone=
 const cleanPhone=
 phone.replace(/[\s-]/g,"");
 
-if(!/^(?:\+254|254|0)7\d{8}$/.test(cleanPhone)){
+if(!/^(?:\+?254[17]\d{8}|0[17]\d{8})$/.test(cleanPhone)){
 
 alert(
-"Please enter a valid Kenyan M-Pesa number, for example 0712345678."
+"Please enter a valid Kenyan M-Pesa number, for example 0712345678 or 0112345678."
 );
 
 return;
 
 }
 
-let paidViaApi=false;
-if(invoice.fromApi){
+if(!invoice.fromApi){
+  alert("This invoice is not available for online payment. Refresh invoices and try again.");
+  return;
+}
+
+const submitButton=event.submitter;
+if(submitButton) submitButton.disabled=true;
+try{
+  const result=await apiRequest(`/invoices/${encodeURIComponent(invoice.id)}/pay`,{
+    method:"POST",
+    body:JSON.stringify({phone:cleanPhone})
+  });
+  Object.assign(invoice,result.invoice,{fromApi:true});
+  saveDB();
+  if(result.payment.status==="Review Required"){
+    showMpesaPaymentReview(invoice.id,result.payment.id,Boolean(result.payment.checkoutRequestId));
+  }else{
+    showMpesaPaymentPending(invoice.id,result.payment.id);
+  }
+}catch(error){
+  alert(error.message||"Unable to start the M-Pesa payment.");
+  if(submitButton) submitButton.disabled=false;
+}
+
+}
+
+function showMpesaPaymentPending(invoiceId,paymentId){
+  document.getElementById("modalContent").innerHTML=`
+    <h2>M-Pesa payment status</h2>
+    <div class="alert alert-info">
+      A payment prompt was sent to your phone. Approve it on your device, then
+      check the status here. This invoice remains unpaid until Safaricom confirms payment.
+    </div>
+    <div class="flex">
+      <button type="button" class="btn btn-success" onclick="checkMpesaPayment('${invoiceId}','${paymentId}')">Check payment status</button>
+      <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
+    </div>`;
+  openModal();
+}
+
+function showMpesaPaymentReview(invoiceId,paymentId,canCheck){
+  document.getElementById("modalContent").innerHTML=`
+    <h2>M-Pesa payment needs review</h2>
+    <div class="alert alert-warning">
+      Safaricom did not return a definitive response. Do not start another payment
+      for this invoice until its status is confirmed. Contact the hospital if this
+      status remains unresolved.
+    </div>
+    <div class="flex">
+      ${canCheck?`<button type="button" class="btn btn-success" onclick="checkMpesaPayment('${invoiceId}','${paymentId}')">Check payment status</button>`:""}
+      <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
+    </div>`;
+  openModal();
+}
+
+async function checkMpesaPayment(invoiceId,paymentId){
   try{
-    const paid=await apiRequest(`/invoices/${encodeURIComponent(invoice.id)}/pay`,{
-      method:"POST",
-      body:JSON.stringify({phone:cleanPhone,method:"M-Pesa Paybill"})
+    const result=await apiRequest(`/payments/${encodeURIComponent(paymentId)}/query`,{
+      method:"POST"
     });
-    paidViaApi=true;
-    invoice.status="Paid";
-    invoice.paidAt=new Date().toISOString();
-    invoice.transactionReference=paid.payment.reference;
+    const invoice=db.invoices.find(row=>row.id===invoiceId);
+    if(invoice) Object.assign(invoice,result.invoice,{fromApi:true});
+    saveDB();
+    if(result.payment.status==="Completed"){
+      closeModal();
+      alert(`Payment confirmed${result.payment.transactionReference?`. M-Pesa receipt: ${result.payment.transactionReference}`:""}.`);
+      navigate("invoices");
+      return;
+    }
+    if(result.payment.status==="Failed"){
+      closeModal();
+      alert(result.payment.resultDesc||"M-Pesa did not complete the payment. You can try again.");
+      navigate("invoices");
+      return;
+    }
+    if(result.payment.status==="Review Required"){
+      showMpesaPaymentReview(invoiceId,paymentId,Boolean(result.payment.checkoutRequestId));
+      return;
+    }
+    showMpesaPaymentPending(invoiceId,paymentId);
+    alert("M-Pesa has not confirmed the payment yet. Approve the prompt on your phone and check again.");
   }catch(error){
-    alert(error.message||"Unable to confirm payment.");
-    return;
+    alert(error.message||"Unable to check the M-Pesa payment status.");
   }
-}
-
-invoice.status="Paid";
-
-invoice.paymentMethod="M-Pesa Paybill";
-
-invoice.transactionReference=
-"MPESA-"+Date.now();
-
-invoice.paidAt=
-new Date().toISOString();
-
-/* Immediately mark the linked consultation appointment as paid/confirmed. */
-if(invoice.type==="Consultation" && invoice.appointmentId){
-  const paidAppointment=db.appointments.find(a=>a.id===invoice.appointmentId);
-  if(paidAppointment){
-    paidAppointment.status="Confirmed";
-    paidAppointment.paymentStatus="Paid";
-    paidAppointment.paidAt=invoice.paidAt;
-    paidAppointment.paymentReference=invoice.transactionReference;
-  }
-}
-
-db.payments.push({
-
-id:uid("payment"),
-
-invoiceId,
-
-patientId:
-invoice.patientId,
-
-method:"M-Pesa Paybill",
-
-phone:cleanPhone,
-
-transactionReference:
-invoice.transactionReference,
-
-amount:
-invoice.total,
-
-status:"Completed",
-
-createdAt:
-new Date().toISOString()
-
-});
-
-if(!paidViaApi) handlePaidInvoice(invoice);
-
-saveDB();
-
-closeModal();
-
-alert(
-`Payment successful.\nReference: ${invoice.transactionReference}`
-);
-
-navigate(
-currentUser.role==="patient"
-? "invoices"
-: currentPage
-);
-
 }
 
 function __baseHandlePaidInvoice(
@@ -5035,7 +5012,7 @@ return;
 
 }
 
-processDemoPayment(
+processMpesaPayment(
 invoice.id
 );
 }
@@ -5777,11 +5754,8 @@ document.getElementById(
 
 <div class="alert alert-info">
 
-  Demo payments use M-Pesa Paybill.
-  Business Number: <strong>979250</strong>.
-  The client uses their name as the account name.
-  Production deployment should connect this to
-  M-Pesa Daraja/payment confirmation and webhook verification.
+  Pay using a secure M-Pesa prompt sent to your phone. An invoice is marked paid
+  only after the server verifies the transaction with Safaricom.
 
 </div>
 
@@ -5854,14 +5828,21 @@ ${showMelvinDeliveryDemo?`<div class="alert alert-warning"><strong>DEMO PREVIEW 
               ${
                 i.demoOnly
                 ? `<button class="btn btn-secondary" type="button" disabled>Pay Delivery Fee (Demo Only)</button>`
-                : isUnpaidInvoiceStatus(i.status) &&
+                : i.status==="Pending" && i.paymentId &&
+                  i.paymentStatus==="Review Required" && !i.checkoutRequestId &&
+                  currentUser.role==="patient"
+                  ? `<span class="small text-muted">Contact support before retrying</span>`
+                  : i.status==="Pending" && i.paymentId && currentUser.role==="patient"
+                  ? `<button class="btn btn-secondary" onclick="checkMpesaPayment('${i.id}','${i.paymentId}'); return false;">Check M-Pesa Status</button>`
+                  : isUnpaidInvoiceStatus(i.status) &&
+                  i.fromApi &&
                   currentUser.role==="patient"
                   ?
                   `<button
                    class="btn btn-success"
-                   onclick="processDemoPayment('${i.id}'); return false;"
+                   onclick="processMpesaPayment('${i.id}'); return false;"
                  >
-                   ${isDeliveryInvoice(i)?"Pay Delivery Fee":"Pay M-Pesa Paybill"}
+                   ${isDeliveryInvoice(i)?"Pay Delivery Fee":"Pay with M-Pesa"}
                  </button>`
                   :
                   ""

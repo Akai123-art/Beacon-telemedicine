@@ -9,7 +9,7 @@ BEACON_ADMIN_PASSWORD to the recovery password, then remove the reset flag.
 """
 # Cell 2 - imports, config and a small SQLite document store
 import os
-import sqlite3, json, threading, math, secrets, csv, io, datetime as dt, time
+import sqlite3, json, threading, math, secrets, csv, io, datetime as dt, time, re
 import base64
 from pathlib import Path
 from functools import wraps
@@ -114,6 +114,191 @@ app = Flask(__name__)
 from flask_cors import CORS; CORS(app)  # allow cross-origin requests for testing
 serializer = URLSafeTimedSerializer(SECRET_KEY)
 FRONTEND_DIR = Path(__file__).resolve().parent
+MPESA_ENV = os.environ.get("BEACON_MPESA_ENV", "sandbox").strip().lower()
+
+
+class MpesaError(Exception):
+    pass
+
+
+class MpesaSubmissionUnknown(MpesaError):
+    pass
+
+
+def mpesa_base_url():
+    if MPESA_ENV == "sandbox":
+        return "https://sandbox.safaricom.co.ke"
+    if MPESA_ENV == "production":
+        return "https://api.safaricom.co.ke"
+    raise MpesaError("BEACON_MPESA_ENV must be 'sandbox' or 'production'.")
+
+
+def mpesa_credentials():
+    names = {
+        "consumer key": os.environ.get("BEACON_MPESA_CONSUMER_KEY", "").strip(),
+        "consumer secret": os.environ.get("BEACON_MPESA_CONSUMER_SECRET", "").strip(),
+        "shortcode": os.environ.get("BEACON_MPESA_SHORTCODE", "").strip(),
+        "passkey": os.environ.get("BEACON_MPESA_PASSKEY", "").strip(),
+        "callback URL": os.environ.get("BEACON_MPESA_CALLBACK_URL", "").strip(),
+    }
+    missing = [name for name, value in names.items() if not value]
+    if missing:
+        raise MpesaError("M-Pesa is not configured. Missing: " + ", ".join(missing) + ".")
+    if not re.fullmatch(r"\d{5,7}", names["shortcode"]):
+        raise MpesaError("BEACON_MPESA_SHORTCODE must contain 5 to 7 digits.")
+    if not names["callback URL"].startswith("https://"):
+        raise MpesaError("BEACON_MPESA_CALLBACK_URL must be a publicly reachable HTTPS URL.")
+    return names
+
+
+def mpesa_json_request(url, headers, payload=None):
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    request_headers = dict(headers)
+    if payload is not None:
+        request_headers["Content-Type"] = "application/json"
+    req = Request(url, data=data, headers=request_headers)
+    try:
+        with urlopen(req, timeout=20) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        app.logger.error("M-Pesa API returned HTTP %s.", exc.code)
+        if exc.code >= 500:
+            raise MpesaSubmissionUnknown(
+                "M-Pesa did not confirm whether it accepted the payment request."
+            ) from exc
+        raise MpesaError("M-Pesa could not process the request. Please try again.") from exc
+    except URLError as exc:
+        app.logger.error("M-Pesa API request failed: %s", exc.reason)
+        raise MpesaSubmissionUnknown(
+            "M-Pesa did not confirm whether it accepted the payment request."
+        ) from exc
+    except OSError as exc:
+        app.logger.error("M-Pesa API network request failed: %s", exc)
+        raise MpesaSubmissionUnknown(
+            "M-Pesa did not confirm whether it accepted the payment request."
+        ) from exc
+    except (ValueError, UnicodeDecodeError) as exc:
+        app.logger.error("M-Pesa API returned an invalid response.")
+        raise MpesaSubmissionUnknown(
+            "M-Pesa returned an unreadable response for the payment request."
+        ) from exc
+    if not isinstance(result, dict):
+        raise MpesaSubmissionUnknown(
+            "M-Pesa returned an invalid response for the payment request."
+        )
+    return result
+
+
+def mpesa_access_token():
+    credentials = mpesa_credentials()
+    basic = base64.b64encode(
+        f"{credentials['consumer key']}:{credentials['consumer secret']}".encode("utf-8")
+    ).decode("ascii")
+    result = mpesa_json_request(
+        f"{mpesa_base_url()}/oauth/v1/generate?grant_type=client_credentials",
+        {"Authorization": f"Basic {basic}"},
+    )
+    token = result.get("access_token")
+    if not isinstance(token, str) or not token:
+        app.logger.error("M-Pesa OAuth response did not contain an access token.")
+        raise MpesaError("M-Pesa authentication failed. Please try again.")
+    return token
+
+
+def mpesa_password(credentials, timestamp):
+    value = credentials["shortcode"] + credentials["passkey"] + timestamp
+    return base64.b64encode(value.encode("utf-8")).decode("ascii")
+
+
+def mpesa_query_response(credentials, checkout_id, token):
+    timestamp = mpesa_timestamp()
+    return mpesa_json_request(
+        f"{mpesa_base_url()}/mpesa/stkpushquery/v1/query",
+        {"Authorization": f"Bearer {token}"},
+        {
+            "BusinessShortCode": credentials["shortcode"],
+            "Password": mpesa_password(credentials, timestamp),
+            "Timestamp": timestamp,
+            "CheckoutRequestID": checkout_id,
+        },
+    )
+
+
+def normalize_mpesa_phone(value):
+    if not isinstance(value, str):
+        return None
+    phone = re.sub(r"[\s()-]", "", value)
+    if phone.startswith("+"):
+        phone = phone[1:]
+    if phone.startswith("0"):
+        phone = "254" + phone[1:]
+    if re.fullmatch(r"254[17]\d{8}", phone):
+        return phone
+    return None
+
+
+def mpesa_timestamp():
+    east_africa = dt.timezone(dt.timedelta(hours=3))
+    return dt.datetime.now(east_africa).strftime("%Y%m%d%H%M%S")
+
+
+def mpesa_stk_payload(credentials, phone, invoice):
+    timestamp = mpesa_timestamp()
+    try:
+        amount = float(invoice.get("amount", 0))
+    except (TypeError, ValueError):
+        raise MpesaError("This invoice has an invalid amount.")
+    if amount <= 0 or not amount.is_integer():
+        raise MpesaError("M-Pesa payments require a positive whole-KES invoice amount.")
+    return {
+        "BusinessShortCode": credentials["shortcode"],
+        "Password": mpesa_password(credentials, timestamp),
+        "Timestamp": timestamp,
+        "TransactionType": "CustomerPayBillOnline",
+        "Amount": int(amount),
+        "PartyA": phone,
+        "PartyB": credentials["shortcode"],
+        "PhoneNumber": phone,
+        "CallBackURL": credentials["callback URL"],
+        "AccountReference": re.sub(r"[^A-Za-z0-9]", "", invoice["id"])[:12],
+        "TransactionDesc": "Invoice pay",
+    }
+
+
+def settle_mpesa_payment(payment_id, result_code, result_desc):
+    with _lock:
+        payment = get("payments", payment_id)
+        if not payment:
+            return None, None
+        invoice = get("invoices", payment.get("invoiceId", ""))
+        if not invoice:
+            app.logger.error("M-Pesa payment %s has no matching invoice.", payment_id)
+            return payment, None
+        if payment.get("status") == "Completed":
+            return payment, invoice
+
+        changes = {"resultCode": str(result_code), "resultDesc": str(result_desc or "")}
+        if str(result_code) != "0":
+            payment = update("payments", payment_id, **changes, status="Failed")
+            if invoice.get("paymentId") == payment_id and invoice.get("status") != "Paid":
+                update(
+                    "invoices", invoice["id"], status="Unpaid", paymentId=None,
+                    paymentStatus="Failed", checkoutRequestId=None,
+                )
+            return payment, get("invoices", invoice["id"])
+
+        if invoice.get("status") == "Paid" and invoice.get("paymentId") != payment_id:
+            app.logger.error("M-Pesa payment %s succeeded for already-paid invoice %s.", payment_id, invoice["id"])
+            return update("payments", payment_id, **changes, status="Review Required"), invoice
+
+        payment = update("payments", payment_id, **changes, status="Completed", completedAt=now())
+        invoice = update(
+            "invoices", invoice["id"], status="Paid", paymentId=payment_id,
+            paymentMethod="M-Pesa", paymentStatus="Completed",
+            transactionReference=changes.get("transactionReference"), paidAt=now(),
+        )
+        after_payment(invoice)
+        return payment, invoice
 
 def err(msg, code=400): return jsonify({"error": msg}), code
 
@@ -881,8 +1066,11 @@ def invoices():
 @auth("patient")
 def pay(iid):
     inv, d = get("invoices", iid), body()
+    if not isinstance(d, dict): return err("Payment request must be a JSON object.")
     if not inv or inv["patientId"] != g.user["id"]: return err("Invoice not found", 404)
-    if inv["status"] == "Paid": return err("Invoice already paid", 409)
+    if inv.get("status") == "Paid": return err("Invoice already paid", 409)
+    if str(inv.get("status", "")).casefold() not in {"unpaid", "pending", "pending payment", "awaiting payment"}:
+        return err("This invoice is not available for payment.", 409)
     if inv.get("kind") == "medicine":
         order = get("pharmacyOrders", inv.get("refId", ""))
         if not order: return err("Medicine order not found", 404)
@@ -890,13 +1078,172 @@ def pay(iid):
             med = get("inventory", item.get("medicineId", ""))
             if not med or med["quantity"] < int(item.get("quantity", 0)):
                 return err(f"Insufficient stock for {item.get('medicineName', item.get('name', 'medicine'))}", 409)
-    # DEMO ONLY - replace with a real M-Pesa Daraja STK push + callback here
-    pay_rec = put("payments", {"id": uid("pay"), "invoiceId": iid, "amount": inv["amount"],
-                               "method": d.get("method", "M-Pesa"), "phone": d.get("phone", g.user["phone"]),
-                               "reference": "SIM" + secrets.token_hex(4).upper(), "createdAt": now()})
-    inv = update("invoices", iid, status="Paid", paymentId=pay_rec["id"])
-    after_payment(inv)
-    return jsonify({"invoice": inv, "payment": pay_rec})
+    phone = normalize_mpesa_phone(d.get("phone", g.user.get("phone", "")))
+    if not phone:
+        return err("Enter a valid Kenyan M-Pesa phone number.")
+
+    try:
+        credentials = mpesa_credentials()
+        payload = mpesa_stk_payload(credentials, phone, inv)
+    except MpesaError as exc:
+        return err(str(exc), 503)
+
+    with _lock:
+        inv = get("invoices", iid)
+        if not inv or inv.get("patientId") != g.user["id"]:
+            return err("Invoice not found", 404)
+        if inv.get("status") == "Paid":
+            return err("Invoice already paid", 409)
+        existing = next(
+            (payment for payment in all_("payments", invoiceId=iid)
+             if payment.get("status") in ("Pending", "Review Required")),
+            None,
+        )
+        if existing:
+            return err("A payment for this invoice is already being processed.", 409)
+        pay_rec = put("payments", {
+            "id": uid("pay"), "invoiceId": iid, "amount": inv["amount"], "method": "M-Pesa",
+            "phone": phone, "status": "Pending", "createdAt": now(),
+        })
+
+    try:
+        token = mpesa_access_token()
+    except MpesaError as exc:
+        update("payments", pay_rec["id"], status="Failed", resultDesc=str(exc))
+        return err(str(exc), 502)
+
+    def mark_submission_unknown(message, checkout_id=None):
+        changes = {"status": "Review Required", "resultDesc": message}
+        if checkout_id:
+            changes["checkoutRequestId"] = checkout_id
+        payment = update("payments", pay_rec["id"], **changes)
+        invoice = update(
+            "invoices", iid, status="Pending", paymentId=pay_rec["id"],
+            paymentStatus="Review Required", checkoutRequestId=checkout_id,
+        )
+        return jsonify({"invoice": invoice, "payment": payment}), 202
+
+    try:
+        response = mpesa_json_request(
+            f"{mpesa_base_url()}/mpesa/stkpush/v1/processrequest",
+            {"Authorization": f"Bearer {token}"},
+            payload,
+        )
+    except MpesaSubmissionUnknown as exc:
+        app.logger.error("M-Pesa submission status is unknown for invoice %s.", iid)
+        return mark_submission_unknown(str(exc))
+    except MpesaError as exc:
+        update("payments", pay_rec["id"], status="Failed", resultDesc=str(exc))
+        return err(str(exc), 502)
+
+    response_code = response.get("ResponseCode")
+    checkout_id = response.get("CheckoutRequestID")
+    if response_code is None or str(response_code) == "0" and not isinstance(checkout_id, str):
+        app.logger.error("M-Pesa returned an incomplete STK Push response for invoice %s.", iid)
+        return mark_submission_unknown(
+            "M-Pesa did not return enough information to determine the payment status.",
+            checkout_id if isinstance(checkout_id, str) else None,
+        )
+    if str(response_code) != "0":
+        description = response.get("ResponseDescription") or response.get("errorMessage")
+        app.logger.error("M-Pesa STK Push was not accepted: %s", description or "invalid response")
+        update("payments", pay_rec["id"], status="Failed", resultDesc=str(description or "Request not accepted"))
+        return err("M-Pesa did not accept the payment request. Please check the number and try again.", 502)
+    if not checkout_id:
+        app.logger.error("M-Pesa accepted an STK Push without a checkout ID for invoice %s.", iid)
+        return mark_submission_unknown(
+            "M-Pesa accepted the request but did not return a checkout request ID."
+        )
+
+    with _lock:
+        pay_rec = update(
+            "payments", pay_rec["id"], merchantRequestId=response.get("MerchantRequestID"),
+            checkoutRequestId=response["CheckoutRequestID"],
+            responseDescription=response.get("ResponseDescription", ""),
+        )
+        inv = update(
+            "invoices", iid, status="Pending", paymentId=pay_rec["id"],
+            paymentStatus="Pending", checkoutRequestId=pay_rec["checkoutRequestId"],
+        )
+    return jsonify({"invoice": inv, "payment": pay_rec}), 202
+
+
+@app.post("/api/payments/<pid>/query")
+@auth("patient")
+def query_mpesa_payment(pid):
+    payment = get("payments", pid)
+    invoice = get("invoices", payment.get("invoiceId", "")) if payment else None
+    if not payment or not invoice or invoice.get("patientId") != g.user["id"]:
+        return err("Payment not found", 404)
+    if payment.get("status") in ("Completed", "Failed"):
+        return jsonify({"payment": payment, "invoice": invoice})
+    if not payment.get("checkoutRequestId"):
+        return err("M-Pesa could not confirm the request. Do not retry; contact support to verify its status.", 409)
+
+    try:
+        credentials = mpesa_credentials()
+        token = mpesa_access_token()
+        response = mpesa_query_response(credentials, payment["checkoutRequestId"], token)
+    except MpesaError as exc:
+        return err(str(exc), 502)
+
+    returned_checkout_id = response.get("CheckoutRequestID")
+    if returned_checkout_id and returned_checkout_id != payment["checkoutRequestId"]:
+        app.logger.error("M-Pesa query response did not match payment %s.", pid)
+        return err("M-Pesa returned a mismatched payment status.", 502)
+    if str(response.get("ResponseCode")) != "0":
+        description = response.get("ResponseDescription") or response.get("errorMessage")
+        return err(str(description or "M-Pesa could not check this payment yet."), 502)
+    if response.get("ResultCode") is not None and not isinstance(response["ResultCode"], (int, str)):
+        return err("M-Pesa returned an invalid payment status.", 502)
+    if response.get("ResultCode") is not None:
+        payment, invoice = settle_mpesa_payment(
+            pid, response["ResultCode"], response.get("ResultDesc", ""),
+        )
+    else:
+        payment, invoice = get("payments", pid), get("invoices", invoice["id"])
+    return jsonify({"payment": payment, "invoice": invoice})
+
+
+@app.post("/api/mpesa/callback")
+def mpesa_callback():
+    data = request.get_json(silent=True)
+    callback_body = data.get("Body") if isinstance(data, dict) else None
+    callback = callback_body.get("stkCallback") if isinstance(callback_body, dict) else None
+    if not isinstance(callback, dict):
+        return err("Invalid M-Pesa callback.")
+    checkout_id = callback.get("CheckoutRequestID")
+    result_code = callback.get("ResultCode")
+    if not isinstance(checkout_id, str) or not checkout_id or not isinstance(result_code, (int, str)):
+        return err("Invalid M-Pesa callback.")
+
+    payment = next(
+        iter(all_("payments", checkoutRequestId=checkout_id)),
+        None,
+    )
+    if not payment:
+        app.logger.warning("Received M-Pesa callback for an unknown checkout request.")
+        return jsonify({"ResultCode": 0, "ResultDesc": "Callback acknowledged"})
+
+    try:
+        credentials = mpesa_credentials()
+        token = mpesa_access_token()
+        verified = mpesa_query_response(credentials, checkout_id, token)
+    except MpesaError as exc:
+        app.logger.error("Could not verify M-Pesa callback: %s", exc)
+        return err("M-Pesa could not verify the callback. Please retry.", 503)
+    verified_code = verified.get("ResultCode")
+    if (str(verified.get("ResponseCode")) != "0"
+            or not isinstance(verified_code, (int, str))):
+        app.logger.error("M-Pesa query did not confirm callback for checkout request.")
+        return err("M-Pesa could not verify the callback. Please retry.", 503)
+    if verified.get("CheckoutRequestID") and verified["CheckoutRequestID"] != checkout_id:
+        app.logger.error("M-Pesa callback verification returned a different checkout request.")
+        return err("M-Pesa could not verify the callback. Please retry.", 503)
+    settle_mpesa_payment(
+        payment["id"], verified_code, verified.get("ResultDesc", ""),
+    )
+    return jsonify({"ResultCode": 0, "ResultDesc": "Callback acknowledged"})
 
 def view_delivery(dv):
     d = dict(dv)

@@ -26,6 +26,38 @@ them to the hosted disk using a secure, verified process before directing users
 to the hosted app. Do not put real patient records or credentials in source
 control.
 
+## M-Pesa Daraja payments
+
+Invoice payments use Daraja STK Push. The patient enters a Kenyan M-Pesa number,
+approves the prompt on their phone, and the invoice remains pending until the
+server confirms the result using the Daraja Express Query API. A callback by
+itself does not mark an invoice paid.
+If Safaricom's submission response is ambiguous, the invoice is held for review
+and cannot be paid again until its status is checked, preventing duplicate
+charges.
+
+Configure these environment variables on Render or the local server using
+credentials from the Safaricom Daraja portal:
+
+- `BEACON_MPESA_ENV`: `sandbox` (default) or `production`
+- `BEACON_MPESA_CONSUMER_KEY`: Daraja app consumer key
+- `BEACON_MPESA_CONSUMER_SECRET`: Daraja app consumer secret
+- `BEACON_MPESA_SHORTCODE`: 5–7 digit PayBill shortcode
+- `BEACON_MPESA_PASSKEY`: Lipa Na M-Pesa Online passkey for that shortcode
+- `BEACON_MPESA_CALLBACK_URL`: publicly reachable HTTPS URL ending in
+  `/api/mpesa/callback` (for example,
+  `https://your-service.onrender.com/api/mpesa/callback`)
+
+Use the Daraja sandbox credentials and shortcode while testing. Switch to
+`production` only after Safaricom has enabled the production app and supplied
+the production shortcode and passkey. The callback URL must point to the
+deployed service; localhost is not reachable by Safaricom. Keep all keys,
+secrets, and passkeys in environment settings, never in source control. If
+payment credentials are missing or invalid, the payment endpoint reports a
+configuration error and does not mark an invoice paid.
+STK Push uses the Daraja app consumer key/secret, shortcode, and passkey; it
+does not use the initiator username/password or Party B test value.
+
 ## Telemedicine audio/video consultations
 
 The consultation room uses browser WebRTC for audio/video; audio-only calls work
