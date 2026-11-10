@@ -11961,7 +11961,7 @@ window.joinConsultation = async function(appointmentId, mediaMode="audio"){
   const c = isDoctor ? getOrCreateConsult(a) : consultByAppt(a.id);
   if(isDoctor) saveDB();
   const S = V8.session = {apptId:a.id, a, isDoctor, mediaMode:mediaMode==="video"?"video":"audio", otherName:other?.name||"the other participant", otherSeen:0, lines:[], speakLang:"en", viewLang:"orig",
-    captionsOn:false, startedAt:Date.now(), translators:{}, lastSaved:0, signalCursor:0, pendingCandidates:[], localCandidates:[], localDescriptionSent:false, rtcStopped:false, rtcEnded:false};
+    captionsOn:false, startedAt:Date.now(), translators:{}, lastSaved:0, signalCursor:0, pendingCandidates:[], localCandidates:[], localDescriptionSent:false, lastRemoteOfferSdp:null, rtcStopped:false, rtcEnded:false};
   /* A returning transcript (e.g. doctor re-joins) is restored. */
   if(c && c.transcript && c.transcript.length) S.lines = c.transcript.map(l=>({...l}));
   const hist = isDoctor ? patientHistory(a.patientId,a.id) : [];
@@ -12084,13 +12084,23 @@ async function handleRtcSignal(S,message){
   const pc=S.peerConnection;
   if(message.type==="offer"){
     if(S.isDoctor) throw new Error("Received an unexpected WebRTC offer from the patient.");
+    if(message.payload.sdp===S.lastRemoteOfferSdp) return;
+    if(pc.signalingState!=="stable"){
+      console.warn("Ignoring an overlapping WebRTC offer in state:",pc.signalingState);
+      return;
+    }
     await pc.setRemoteDescription(message.payload);
+    S.lastRemoteOfferSdp=message.payload.sdp;
     for(const candidate of S.pendingCandidates.splice(0)) await addRemoteRtcCandidate(S,candidate);
     const answer=await pc.createAnswer();
     await publishRtcDescription(S,"answer",answer);
     rtcStatus(S,"Connected to the doctor's session. Establishing the video connection…");
   }else if(message.type==="answer"){
     if(!S.isDoctor) throw new Error("Received an unexpected WebRTC answer.");
+    if(pc.signalingState!=="have-local-offer"){
+      console.warn("Ignoring a stale or duplicate WebRTC answer in state:",pc.signalingState);
+      return;
+    }
     await pc.setRemoteDescription(message.payload);
     for(const candidate of S.pendingCandidates.splice(0)) await addRemoteRtcCandidate(S,candidate);
   }else if(message.type==="candidate"){
