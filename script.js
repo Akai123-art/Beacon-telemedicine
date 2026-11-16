@@ -3761,7 +3761,7 @@ ${
                      class="btn btn-success"
                      onclick="payRelatedInvoice('${getPharmacyInvoiceId(order.id)}')"
                    >
-                     Pay Medicine
+                     M-Pesa Demo — Medicine
                    </button>`
                   :
                   ""
@@ -3976,12 +3976,12 @@ return;
 
 }
 
-processMpesaPayment(
+processDemoPayment(
 invoiceId
 );
 }
 
-function processMpesaPayment(
+function processDemoPayment(
 invoiceId
 ){
 
@@ -4004,15 +4004,6 @@ return;
 
 }
 
-if(invoice.status==="Pending" && invoice.paymentId){
-  if(invoice.paymentStatus==="Review Required"){
-    showMpesaPaymentReview(invoice.id,invoice.paymentId,Boolean(invoice.checkoutRequestId));
-  }else{
-    showMpesaPaymentPending(invoice.id,invoice.paymentId);
-  }
-  return;
-}
-
 if(!currentUser || currentUser.role!=="patient"){
   alert("Only the patient who owns this invoice can make a payment.");
   return;
@@ -4025,38 +4016,34 @@ if(!invoice.fromApi){
 
 const title =
 invoice.type==="Delivery"
-? "Pay Delivery Fee"
+? "Simulated M-Pesa Delivery Prompt"
 : invoice.type==="Pharmacy"
-? "Pay Medicine"
+? "Simulated M-Pesa Medicine Prompt"
 : invoice.type==="Consultation"
-? "Pay Consultation"
-: "Make Payment";
+? "Simulated M-Pesa Consultation Prompt"
+: "Simulated M-Pesa Prompt";
 
 document.getElementById("modalContent").innerHTML=`
 
   <h2>${title}</h2>
 
-  <div class="alert alert-info">
+  <div class="alert alert-warning">
 
-    <strong>Amount to pay:</strong>
+    <strong>DEMO ONLY — no real M-Pesa request will be sent.</strong>
+    <br><br>
+    Simulated amount (not charged):
     ${money(invoice.total)}
 
-    <br><br>
-    Enter the M-Pesa number that should receive a payment prompt. Your invoice
-    will be marked paid only after Safaricom confirms the transaction.
-
+    <br>
+    Nothing is sent to your phone or Safaricom.
   </div>
 
-  <form onsubmit="submitMpesaPayment(event,'${invoice.id}')">
+  <form onsubmit="showDemoMpesaPrompt(event,'${invoice.id}')">
 
     <div class="form-group">
-
-      <label for="mpesaPhone">
-        M-Pesa phone number
-      </label>
-
+      <label for="demoMpesaPhone">M-Pesa number (demo only)</label>
       <input
-        id="mpesaPhone"
+        id="demoMpesaPhone"
         class="form-control"
         type="tel"
         inputmode="numeric"
@@ -4066,11 +4053,6 @@ document.getElementById("modalContent").innerHTML=`
         value="${escapeHTML(getUser(invoice.patientId)?.phone || currentUser.phone || "")}"
         required
       >
-
-      <div class="small text-muted mt">
-        You can use a Kenyan 07… or 01… M-Pesa number.
-      </div>
-
     </div>
 
     <div class="flex">
@@ -4079,7 +4061,7 @@ document.getElementById("modalContent").innerHTML=`
         type="submit"
         class="btn btn-success"
       >
-        📱 Send M-Pesa prompt
+        Send demo prompt
       </button>
 
       <button
@@ -4097,14 +4079,44 @@ document.getElementById("modalContent").innerHTML=`
 
 openModal();
 
-setTimeout(()=>{
-  const input=document.getElementById("mpesaPhone");
-  if(input) input.focus();
-},100);
-
 }
 
-async function submitMpesaPayment(
+function showDemoMpesaPrompt(event,invoiceId){
+  event.preventDefault();
+  const phone=(document.getElementById("demoMpesaPhone")?.value||"").trim();
+  const cleanPhone=phone.replace(/[\s()-]/g,"");
+  if(!/^(?:\+?254[17]\d{8}|0[17]\d{8})$/.test(cleanPhone)){
+    alert("Enter a valid Kenyan number for the demo prompt, for example 0712345678.");
+    return;
+  }
+  const invoice=db.invoices.find(row=>row.id===invoiceId);
+  if(!invoice){
+    alert("Invoice not found.");
+    return;
+  }
+  document.getElementById("modalContent").innerHTML=`
+    <h2>Simulated M-Pesa prompt</h2>
+    <div class="alert alert-warning">
+      <strong>FAKE PROMPT — DEMO ONLY</strong>
+      <p>This is a pretend prompt displayed only on this screen. It was not sent
+      to ${escapeHTML(cleanPhone)} or Safaricom.</p>
+    </div>
+    <div class="card">
+      <div class="small text-muted">BEACON OF HOPE — TEST PAYMENT</div>
+      <h3>${money(invoice.total)}</h3>
+      <div>Invoice: ${escapeHTML(invoice.invoiceNumber||invoice.id)}</div>
+      <div>Number: ${escapeHTML(cleanPhone)}</div>
+      <p class="small text-muted">No real money will be charged or transferred.</p>
+    </div>
+    <form onsubmit="submitDemoPayment(event,'${invoice.id}')">
+      <div class="flex">
+        <button type="submit" class="btn btn-success">Approve demo prompt</button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Decline</button>
+      </div>
+    </form>`;
+}
+
+async function submitDemoPayment(
 event,
 invoiceId
 ){
@@ -4131,24 +4143,8 @@ return;
 
 }
 
-const phone=
-(document.getElementById("mpesaPhone")?.value||"").trim();
-
-const cleanPhone=
-phone.replace(/[\s-]/g,"");
-
-if(!/^(?:\+?254[17]\d{8}|0[17]\d{8})$/.test(cleanPhone)){
-
-alert(
-"Please enter a valid Kenyan M-Pesa number, for example 0712345678 or 0112345678."
-);
-
-return;
-
-}
-
 if(!invoice.fromApi){
-  alert("This invoice is not available for online payment. Refresh invoices and try again.");
+  alert("This invoice is not available for a demo payment. Refresh invoices and try again.");
   return;
 }
 
@@ -4157,80 +4153,18 @@ if(submitButton) submitButton.disabled=true;
 try{
   const result=await apiRequest(`/invoices/${encodeURIComponent(invoice.id)}/pay`,{
     method:"POST",
-    body:JSON.stringify({phone:cleanPhone})
+    body:JSON.stringify({})
   });
   Object.assign(invoice,result.invoice,{fromApi:true});
   saveDB();
-  if(result.payment.status==="Review Required"){
-    showMpesaPaymentReview(invoice.id,result.payment.id,Boolean(result.payment.checkoutRequestId));
-  }else{
-    showMpesaPaymentPending(invoice.id,result.payment.id);
-  }
+  closeModal();
+  alert("Demo payment recorded. No real money was transferred or charged.");
+  navigate("invoices");
 }catch(error){
-  alert(error.message||"Unable to start the M-Pesa payment.");
+  alert(error.message||"Unable to record the demo payment.");
   if(submitButton) submitButton.disabled=false;
 }
 
-}
-
-function showMpesaPaymentPending(invoiceId,paymentId){
-  document.getElementById("modalContent").innerHTML=`
-    <h2>M-Pesa payment status</h2>
-    <div class="alert alert-info">
-      A payment prompt was sent to your phone. Approve it on your device, then
-      check the status here. This invoice remains unpaid until Safaricom confirms payment.
-    </div>
-    <div class="flex">
-      <button type="button" class="btn btn-success" onclick="checkMpesaPayment('${invoiceId}','${paymentId}')">Check payment status</button>
-      <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
-    </div>`;
-  openModal();
-}
-
-function showMpesaPaymentReview(invoiceId,paymentId,canCheck){
-  document.getElementById("modalContent").innerHTML=`
-    <h2>M-Pesa payment needs review</h2>
-    <div class="alert alert-warning">
-      Safaricom did not return a definitive response. Do not start another payment
-      for this invoice until its status is confirmed. Contact the hospital if this
-      status remains unresolved.
-    </div>
-    <div class="flex">
-      ${canCheck?`<button type="button" class="btn btn-success" onclick="checkMpesaPayment('${invoiceId}','${paymentId}')">Check payment status</button>`:""}
-      <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
-    </div>`;
-  openModal();
-}
-
-async function checkMpesaPayment(invoiceId,paymentId){
-  try{
-    const result=await apiRequest(`/payments/${encodeURIComponent(paymentId)}/query`,{
-      method:"POST"
-    });
-    const invoice=db.invoices.find(row=>row.id===invoiceId);
-    if(invoice) Object.assign(invoice,result.invoice,{fromApi:true});
-    saveDB();
-    if(result.payment.status==="Completed"){
-      closeModal();
-      alert(`Payment confirmed${result.payment.transactionReference?`. M-Pesa receipt: ${result.payment.transactionReference}`:""}.`);
-      navigate("invoices");
-      return;
-    }
-    if(result.payment.status==="Failed"){
-      closeModal();
-      alert(result.payment.resultDesc||"M-Pesa did not complete the payment. You can try again.");
-      navigate("invoices");
-      return;
-    }
-    if(result.payment.status==="Review Required"){
-      showMpesaPaymentReview(invoiceId,paymentId,Boolean(result.payment.checkoutRequestId));
-      return;
-    }
-    showMpesaPaymentPending(invoiceId,paymentId);
-    alert("M-Pesa has not confirmed the payment yet. Approve the prompt on your phone and check again.");
-  }catch(error){
-    alert(error.message||"Unable to check the M-Pesa payment status.");
-  }
 }
 
 function __baseHandlePaidInvoice(
@@ -4970,7 +4904,7 @@ function renderDeliveries(){
           <td>${money(d.deliveryFee||0)}</td>
           <td><span class="badge ${d.status==="Delivered"?'badge-success':d.status.includes('Paid')?'badge-success':'badge-info'}">${escapeHTML(d.status||'-')}</span></td>
           <td>
-            ${currentUser.role==="patient"&&d.status==="Awaiting Delivery Payment"?`<button class="btn btn-success" onclick="payDelivery('${d.id}'); return false;">Pay Delivery Fee</button>`:''}
+            ${currentUser.role==="patient"&&d.status==="Awaiting Delivery Payment"?`<button class="btn btn-success" onclick="payDelivery('${d.id}'); return false;">M-Pesa Demo — Delivery Fee</button>`:''}
             ${currentUser.role==="rider"&&d.status==="Assigned"?`<button class="btn btn-primary" onclick="updateDeliveryStatus('${d.id}','Picked Up')">Pick Up</button>`:''}
             ${currentUser.role==="rider"&&d.status==="Picked Up"?`<button class="btn btn-primary" onclick="updateDeliveryStatus('${d.id}','In Transit')">Start Delivery</button>`:''}
             ${currentUser.role==="rider"&&d.status==="In Transit"?`<button class="btn btn-success" onclick="verifyDeliveryOTP('${d.id}')">Verify Delivery</button>`:''}
@@ -5012,7 +4946,7 @@ return;
 
 }
 
-processMpesaPayment(
+processDemoPayment(
 invoice.id
 );
 }
@@ -5754,8 +5688,8 @@ document.getElementById(
 
 <div class="alert alert-info">
 
-  Pay using a secure M-Pesa prompt sent to your phone. An invoice is marked paid
-  only after the server verifies the transaction with Safaricom.
+  Payments here are simulated for testing only. No real money is charged or
+  transferred, and invoices marked paid are not proof of actual payment.
 
 </div>
 
@@ -5827,22 +5761,16 @@ ${showMelvinDeliveryDemo?`<div class="alert alert-warning"><strong>DEMO PREVIEW 
 
               ${
                 i.demoOnly
-                ? `<button class="btn btn-secondary" type="button" disabled>Pay Delivery Fee (Demo Only)</button>`
-                : i.status==="Pending" && i.paymentId &&
-                  i.paymentStatus==="Review Required" && !i.checkoutRequestId &&
-                  currentUser.role==="patient"
-                  ? `<span class="small text-muted">Contact support before retrying</span>`
-                  : i.status==="Pending" && i.paymentId && currentUser.role==="patient"
-                  ? `<button class="btn btn-secondary" onclick="checkMpesaPayment('${i.id}','${i.paymentId}'); return false;">Check M-Pesa Status</button>`
-                  : isUnpaidInvoiceStatus(i.status) &&
+                ? `<button class="btn btn-secondary" type="button" disabled>M-Pesa Demo — Delivery Fee (Demo Only)</button>`
+                : isUnpaidInvoiceStatus(i.status) &&
                   i.fromApi &&
                   currentUser.role==="patient"
                   ?
                   `<button
                    class="btn btn-success"
-                   onclick="processMpesaPayment('${i.id}'); return false;"
+                   onclick="processDemoPayment('${i.id}'); return false;"
                  >
-                   ${isDeliveryInvoice(i)?"Pay Delivery Fee":"Pay with M-Pesa"}
+                   Pay with M-Pesa (Demo) — ${isDeliveryInvoice(i)?"Delivery Fee":"Invoice"}
                  </button>`
                   :
                   ""
@@ -8942,9 +8870,9 @@ async function renderPharmacy(){
         <td>${delivery?`<div><strong>Location:</strong> ${escapeHTML(delivery.deliveryLocation||'Not confirmed')}<br><strong>Directions:</strong> ${escapeHTML(delivery.directions||'Not confirmed')}<br><strong>Receiver:</strong> ${escapeHTML(delivery.receiverPhone||p?.phone||'-')}<br><strong>Fee:</strong> ${delivery.deliveryFee!=null?money(delivery.deliveryFee):'-'}</div>`:'Not yet created'}</td>
         <td>
           ${currentUser.role==="pharmacist"&&o.status==="Pending"?`<button class="btn btn-primary" onclick="processPharmacyOrder('${o.id}')">Check Stock</button>`:''}
-          ${currentUser.role==="patient"&&o.status==="Awaiting Pharmacy Payment"&&inv?`<button class="btn btn-success" onclick="payRelatedInvoice('${inv.id}'); return false;">Pay Medicine</button>`:''}
+          ${currentUser.role==="patient"&&o.status==="Awaiting Pharmacy Payment"&&inv?`<button class="btn btn-success" onclick="payRelatedInvoice('${inv.id}'); return false;">M-Pesa Demo — Medicine</button>`:''}
           ${pharmacistNeedsDeliveryDetails?`<button class="btn btn-primary" onclick="showDeliveryDetailsForm('${delivery.id}')">📍 Confirm Delivery Details</button>`:''}
-          ${currentUser.role==="patient"&&delivery&&delivery.status==="Awaiting Delivery Payment"&&dinv?`<button class="btn btn-warning" onclick="payRelatedInvoice('${dinv.id}'); return false;">Pay Delivery Fee</button>`:''}
+          ${currentUser.role==="patient"&&delivery&&delivery.status==="Awaiting Delivery Payment"&&dinv?`<button class="btn btn-warning" onclick="payRelatedInvoice('${dinv.id}'); return false;">M-Pesa Demo — Delivery Fee</button>`:''}
           ${pharmacistCanAssignRider?`<button class="btn btn-success" onclick="pharmacistDispatch('${o.id}')">Assign Rider & Dispatch</button>`:''}
         </td>
       </tr>`;
@@ -9853,7 +9781,7 @@ function renderDeliveries(){
       let actions="";
       if(currentUser.role==="patient"&&d.status==="Awaiting Delivery Payment"){
         const inv=db.invoices.find(i=>i.type==="Delivery"&&i.deliveryId===d.id&&i.status==="Pending");
-        if(inv)actions+=`<button class="btn btn-success" onclick="payRelatedInvoice('${inv.id}');return false;">Pay Delivery Fee</button>`;
+        if(inv)actions+=`<button class="btn btn-success" onclick="payRelatedInvoice('${inv.id}');return false;">M-Pesa Demo — Delivery Fee</button>`;
       }
       if(currentUser.role==="pharmacist"&&d.status==="Awaiting Delivery Details") actions+=`<button class="btn btn-primary" onclick="showDeliveryDetailsForm('${d.id}')">📍 Confirm Delivery Details</button>`;
       if(currentUser.role==="rider"&&d.status==="Assigned") actions+=`<button class="btn btn-primary" onclick="riderPickUpMedicine('${d.id}')">📦 Pick Up Medicine</button>`;
@@ -10461,10 +10389,10 @@ function trackDelivery(){ alert("Live GPS tracking is not used. The rider confir
                 if(currentUser.role === "patient"){
                   if(!medicinePaid && medInv?.status === "Pending"){
                     action = `<button class="btn btn-success"
-                      onclick="payRelatedInvoice('${medInv.id}');return false;">Pay Medicine</button>`;
+                      onclick="payRelatedInvoice('${medInv.id}');return false;">M-Pesa Demo — Medicine</button>`;
                   }else if(medicinePaid && d?.status === "Awaiting Delivery Payment" && dinv?.status === "Pending"){
                     action = `<button class="btn btn-warning"
-                      onclick="payRelatedInvoice('${dinv.id}');return false;">Pay Delivery Fee</button>`;
+                      onclick="payRelatedInvoice('${dinv.id}');return false;">M-Pesa Demo — Delivery Fee</button>`;
                   }else if(d?.status === "Delivered"){
                     action = `<span class="badge badge-success">Delivered</span>`;
                   }
