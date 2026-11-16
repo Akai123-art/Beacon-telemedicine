@@ -12089,6 +12089,11 @@ async function startRtcConnection(S){
           placeholder?.classList.remove("hidden");
         });
         if(!event.track.muted) showVideo();
+      }else if(event.track.kind==="audio"){
+        const placeholderMessage=placeholder?.querySelector(".small");
+        if(placeholderMessage){
+          placeholderMessage.textContent="Audio connected. The other participant's camera may be off.";
+        }
       }
     };
     pc.onconnectionstatechange=()=>{
